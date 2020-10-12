@@ -68,20 +68,12 @@ func (header *MessageHeader) Sequence() int32 {
 
 func (header *MessageHeader) cacheReplyFor() {
 	if header.replyFor == nil {
-		replyFor, found := header.Headers[ReplyForHeader]
-		if found {
-			if len(replyFor) != 4 {
-				pfxlog.Logger().Warnf("incorrect replyFor encoding. length should be 4 not %v", len(replyFor))
-			} else {
-				val := int32(binary.LittleEndian.Uint32(replyFor))
-				header.replyFor = &val
-			}
+		val, found := header.GetUint32Header(ReplyForHeader)
+		replyFor := int32(val)
+		if !found {
+			replyFor = -1
 		}
-
-		if replyFor == nil {
-			val := int32(-1)
-			header.replyFor = &val
-		}
+		header.replyFor = &replyFor
 	}
 }
 
@@ -101,9 +93,7 @@ func (header *MessageHeader) IsReplyingTo(sequence int32) bool {
 }
 
 func (header *MessageHeader) PutUint64Header(key int32, value uint64) {
-	encoded := make([]byte, 8)
-	binary.LittleEndian.PutUint64(encoded, value)
-	header.Headers[key] = encoded
+	header.Headers.PutUint64Header(key, value)
 }
 
 func (header *MessageHeader) GetUint64Header(key int32) (uint64, bool) {
@@ -154,46 +144,76 @@ type Headers map[int32][]byte
 
 func (self Headers) PutUint64Header(key int32, value uint64) {
 	encoded := make([]byte, 8)
-	binary.LittleEndian.PutUint64(encoded, value)
+	encoded = encoded[:0]
+	for value > 0 {
+		encoded = append(encoded, byte(value))
+		value = value >> 8
+	}
 	self[key] = encoded
 }
 
 func (self Headers) GetUint64Header(key int32) (uint64, bool) {
 	encoded, ok := self[key]
-	if !ok || len(encoded) != 8 {
+	if !ok {
 		return 0, ok
 	}
-	result := binary.LittleEndian.Uint64(encoded)
+	if len(encoded) > 8 {
+		encoded = encoded[0:8]
+	}
+	var result uint64
+	for i, b := range encoded {
+		result += uint64(b) << (i * 8)
+	}
 	return result, true
 }
 
 func (self Headers) PutUint32Header(key int32, value uint32) {
 	encoded := make([]byte, 4)
-	binary.LittleEndian.PutUint32(encoded, value)
+	encoded = encoded[:0]
+	for value > 0 {
+		encoded = append(encoded, byte(value))
+		value = value >> 8
+	}
 	self[key] = encoded
 }
 
 func (self Headers) GetUint32Header(key int32) (uint32, bool) {
 	encoded, ok := self[key]
-	if !ok || len(encoded) != 4 {
-		return 0, false
+	if !ok {
+		return 0, ok
 	}
-	result := binary.LittleEndian.Uint32(encoded)
+	if len(encoded) > 4 {
+		encoded = encoded[0:4]
+	}
+	var result uint32
+	for i, b := range encoded {
+		result += uint32(b) << (i * 8)
+	}
 	return result, true
 }
 
 func (self Headers) PutUint16Header(key int32, value uint16) {
 	encoded := make([]byte, 2)
-	binary.LittleEndian.PutUint16(encoded, value)
+	encoded = encoded[:0]
+	for value > 0 {
+		encoded = append(encoded, byte(value))
+		value = value >> 8
+	}
 	self[key] = encoded
 }
 
 func (self Headers) GetUint16Header(key int32) (uint16, bool) {
 	encoded, ok := self[key]
-	if !ok || len(encoded) != 2 {
-		return 0, false
+	if !ok {
+		return 0, ok
 	}
-	result := binary.LittleEndian.Uint16(encoded)
+	if len(encoded) > 2 {
+		encoded = encoded[0:2]
+	}
+	var result uint16
+	for i, b := range encoded {
+		result += uint16(b) << (i * 8)
+	}
 	return result, true
 }
 
