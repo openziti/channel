@@ -17,6 +17,7 @@
 package channel
 
 import (
+	"context"
 	"crypto/x509"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/foundation/transport"
@@ -36,6 +37,25 @@ type Channel interface {
 	Underlay() Underlay
 	StartRx()
 	GetTimeSinceLastRead() time.Duration
+}
+
+type SendContext interface {
+	Msg() *Message
+	Priority() Priority
+	WithPriority(p Priority) SendContext
+	Context() context.Context
+	WithTimeout(duration time.Duration) TimeoutSendContext
+	NotifyBeforeWrite()
+	NotifyAfterWrite()
+	NotifyErr(err error)
+	ReplyChan() chan<- *Message
+}
+
+type TimeoutSendContext interface {
+	SendContext
+	SendAndWaitForWire(ch Channel) error
+	SendForReply(ch Channel) (*Message, error)
+	SendForTypedReply(ch Channel, result TypedMessage) error
 }
 
 type Identity interface {
@@ -86,21 +106,11 @@ type Underlay interface {
 	io.Closer
 	IsClosed() bool
 	Headers() map[int32][]byte
+	SetWriteTimeout(duration time.Duration) error
 }
 
 type Sender interface {
-	Send(m *Message) error
-	SendWithPriority(m *Message, p Priority) error
-	SendAndSync(m *Message) (chan error, error)
-	SendAndSyncWithPriority(m *Message, p Priority) (chan error, error)
-	SendWithTimeout(m *Message, timeout time.Duration) error
-	SendPrioritizedWithTimeout(m *Message, p Priority, timeout time.Duration) error
-	SendAndWaitWithTimeout(m *Message, timeout time.Duration) (*Message, error)
-	SendPrioritizedAndWaitWithTimeout(m *Message, p Priority, timeout time.Duration) (*Message, error)
-	SendAndWait(m *Message) (chan *Message, error)
-	SendAndWaitWithPriority(m *Message, p Priority) (chan *Message, error)
-	SendForReply(msg TypedMessage, timeout time.Duration) (*Message, error)
-	SendForReplyAndDecode(msg TypedMessage, timeout time.Duration, result TypedMessage) error
+	Send(sendCtx SendContext) error
 }
 
 const AnyContentType = -1

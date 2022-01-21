@@ -20,10 +20,10 @@ import (
 	"container/heap"
 	"crypto/x509"
 	"fmt"
-	"github.com/golang/protobuf/proto"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/foundation/transport"
+	"github.com/openziti/foundation/util/concurrenz"
 	"github.com/openziti/foundation/util/info"
 	"github.com/openziti/foundation/util/sequence"
 	"github.com/pkg/errors"
@@ -33,25 +33,27 @@ import (
 	"time"
 )
 
+const (
+	FlagClosed    = 0
+	FlagRxStarted = 1
+)
+
 type channelImpl struct {
 	logicalName       string
 	underlay          Underlay
 	options           *Options
 	sequence          *sequence.Sequence
-	outQueue          chan *priorityMessage
+	outQueue          chan SendContext
 	outPriority       *priorityHeap
-	waiters           sync.Map
-	syncers           sync.Map
-	closed            bool
-	rxStarted         bool
+	waiters           waiterMap
+	flags             concurrenz.AtomicBitSet
+	closeNotify       chan struct{}
 	peekHandlers      []PeekHandler
 	transformHandlers []TransformHandler
-	receiveHandlers   map[int32]ReceiveHandler
-	channelLock       sync.RWMutex
+	receiveHandlers   *receiveHandlerCopyOnWriteMap
 	errorHandlers     []ErrorHandler
 	closeHandlers     []CloseHandler
 	userData          interface{}
-	lastActivity      int64
 	lastRead          int64
 }
 
@@ -64,9 +66,10 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 		logicalName:     logicalName,
 		options:         options,
 		sequence:        sequence.NewSequence(),
-		outQueue:        make(chan *priorityMessage, 4),
+		outQueue:        make(chan SendContext, 4),
 		outPriority:     &priorityHeap{},
-		receiveHandlers: make(map[int32]ReceiveHandler),
+		receiveHandlers: NewReceiveHandlerCopyOnWriteMap(),
+		closeNotify:     make(chan struct{}),
 	}
 
 	heap.Init(impl.outPriority)
@@ -94,7 +97,6 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 	}
 
 	impl.startMultiplex()
-	//go impl.keepalive()
 
 	return impl, nil
 }
@@ -114,9 +116,9 @@ func acceptAsync(logicalName string, underlay Underlay, options *Options) {
 		logicalName:     logicalName,
 		options:         options,
 		sequence:        sequence.NewSequence(),
-		outQueue:        make(chan *priorityMessage, 4),
+		outQueue:        make(chan SendContext, 4),
 		outPriority:     &priorityHeap{},
-		receiveHandlers: make(map[int32]ReceiveHandler),
+		receiveHandlers: NewReceiveHandlerCopyOnWriteMap(),
 	}
 
 	heap.Init(impl.outPriority)
@@ -178,9 +180,7 @@ func (channel *channelImpl) AddTransformHandler(h TransformHandler) {
 }
 
 func (channel *channelImpl) AddReceiveHandler(h ReceiveHandler) {
-	channel.channelLock.Lock()
-	channel.receiveHandlers[h.ContentType()] = h
-	channel.channelLock.Unlock()
+	channel.receiveHandlers.put(h)
 }
 
 func (channel *channelImpl) AddErrorHandler(h ErrorHandler) {
@@ -200,15 +200,10 @@ func (channel *channelImpl) GetUserData() interface{} {
 }
 
 func (channel *channelImpl) Close() error {
-	channel.channelLock.Lock()
-	defer channel.channelLock.Unlock()
-
-	if !channel.closed {
+	if channel.flags.CompareAndSet(FlagClosed, false, true) {
 		pfxlog.ContextLogger(channel.Label()).Debug("closing channel")
 
-		channel.closed = true
-
-		close(channel.outQueue)
+		close(channel.closeNotify)
 
 		for _, peekHandler := range channel.peekHandlers {
 			peekHandler.Close(channel)
@@ -222,16 +217,6 @@ func (channel *channelImpl) Close() error {
 			pfxlog.ContextLogger(channel.Label()).Debug("no close handlers")
 		}
 
-		err := errors.New("channel closed unexpectedly")
-		channel.syncers.Range(func(key, value interface{}) bool {
-			syncChan := value.(chan error)
-			select {
-			case syncChan <- err:
-			default:
-			}
-			return true
-		})
-
 		return channel.underlay.Close()
 	}
 
@@ -239,141 +224,21 @@ func (channel *channelImpl) Close() error {
 }
 
 func (channel *channelImpl) IsClosed() bool {
-	return channel.closed
+	return channel.flags.IsSet(FlagClosed)
 }
 
-func (channel *channelImpl) Send(m *Message) error {
-	return channel.SendWithPriority(m, Standard)
-}
+func (channel *channelImpl) Send(sendCtx SendContext) error {
+	if err := sendCtx.Context().Err(); err != nil {
+		return err
+	}
+	channel.stampSequence(sendCtx.Msg())
 
-func (channel *channelImpl) SendWithPriority(m *Message, p Priority) (err error) {
-	if channel.closed {
+	select {
+	case <-sendCtx.Context().Done():
+		return errors.Errorf("msg send queuing failed")
+	case <-channel.closeNotify:
 		return errors.New("channel closed")
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			pfxlog.ContextLogger(channel.Label()).Error("send on closed channel")
-			err = errors.New("send on closed channel")
-			return
-		}
-	}()
-	channel.stampSequence(m)
-	channel.outQueue <- &priorityMessage{m: m, p: p}
-	return nil
-}
-
-func (channel *channelImpl) SendAndSync(m *Message) (chan error, error) {
-	return channel.SendAndSyncWithPriority(m, Standard)
-}
-
-func (channel *channelImpl) SendAndSyncWithPriority(m *Message, p Priority) (syncCh chan error, err error) {
-	if channel.closed {
-		return nil, errors.New("channel closed")
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			pfxlog.ContextLogger(channel.Label()).Error("send on closed channel")
-			err = errors.New("send on closed channel")
-			return
-		}
-	}()
-	channel.stampSequence(m)
-	syncCh = make(chan error, 1)
-	channel.syncers.Store(m.sequence, syncCh)
-	channel.outQueue <- &priorityMessage{m: m, p: p}
-	return syncCh, nil
-}
-
-func (channel *channelImpl) SendPrioritizedWithTimeout(m *Message, p Priority, timeout time.Duration) error {
-	syncC, err := channel.SendAndSyncWithPriority(m, p)
-	if err != nil {
-		return err
-	}
-	select {
-	case err := <-syncC:
-		return err
-	case <-time.After(timeout):
-		return errors.Errorf("write %v deadline exceeded", timeout)
-	}
-}
-
-func (channel *channelImpl) SendWithTimeout(m *Message, timeout time.Duration) error {
-	return channel.SendPrioritizedWithTimeout(m, Standard, timeout)
-}
-
-func (channel *channelImpl) SendPrioritizedAndWaitWithTimeout(m *Message, p Priority, timeout time.Duration) (*Message, error) {
-	replyChan, err := channel.SendAndWaitWithPriority(m, p)
-	if err != nil {
-		return nil, err
-	}
-	select {
-	case replyMsg := <-replyChan:
-		return replyMsg, nil
-	case <-time.After(timeout):
-		return nil, errors.Errorf("timeout waiting for response after %v", timeout)
-	}
-}
-
-func (channel *channelImpl) SendAndWaitWithTimeout(m *Message, timeout time.Duration) (*Message, error) {
-	return channel.SendPrioritizedAndWaitWithTimeout(m, Standard, timeout)
-}
-
-func (channel *channelImpl) SendAndWait(m *Message) (chan *Message, error) {
-	return channel.SendAndWaitWithPriority(m, Standard)
-}
-
-func (channel *channelImpl) SendAndWaitWithPriority(m *Message, p Priority) (waitCh chan *Message, err error) {
-	if channel.closed {
-		return nil, errors.New("channel closed")
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			pfxlog.ContextLogger(channel.Label()).Error("send on closed channel")
-			err = errors.New("send on closed channel")
-			return
-		}
-	}()
-	channel.stampSequence(m)
-	waitCh = make(chan *Message, 1)
-	channel.waiters.Store(m.sequence, waitCh)
-	channel.outQueue <- &priorityMessage{m: m, p: p}
-	return waitCh, nil
-}
-
-func (channel *channelImpl) SendForReply(msg TypedMessage, timeout time.Duration) (*Message, error) {
-	body, err := proto.Marshal(msg)
-	if err != nil {
-		return nil, err
-	}
-
-	envelopeMsg := NewMessage(msg.GetContentType(), body)
-	waitCh, err := channel.SendAndWait(envelopeMsg)
-	if err != nil {
-		return nil, err
-	}
-
-	select {
-	case responseMsg := <-waitCh:
-		return responseMsg, nil
-	case <-time.After(timeout):
-		return nil, errors.Errorf("timed out after %v waiting for response to request of type %v", timeout, msg.GetContentType())
-	}
-}
-
-func (channel *channelImpl) SendForReplyAndDecode(msg TypedMessage, timeout time.Duration, result TypedMessage) error {
-	responseMsg, err := channel.SendForReply(msg, timeout)
-	if err != nil {
-		return err
-	}
-	if responseMsg.ContentType != result.GetContentType() {
-		return errors.Errorf("unexpected response type %v to request of type %v. expected %v",
-			responseMsg.ContentType, msg.GetContentType(), result.GetContentType())
-	}
-	if err := proto.Unmarshal(responseMsg.Body, result); err != nil {
-		return err
+	case channel.outQueue <- sendCtx:
 	}
 	return nil
 }
@@ -398,13 +263,9 @@ func (channel *channelImpl) StartRx() {
 }
 
 func (channel *channelImpl) rxer() {
-	channel.channelLock.Lock()
-	if channel.rxStarted {
-		channel.channelLock.Unlock()
+	if !channel.flags.CompareAndSet(FlagRxStarted, false, true) {
 		return
 	}
-	channel.rxStarted = true
-	channel.channelLock.Unlock()
 
 	log := pfxlog.ContextLogger(channel.Label())
 	log.Debug("started")
@@ -416,12 +277,10 @@ func (channel *channelImpl) rxer() {
 		}
 		_ = channel.Close()
 	}()
-	defer func() {
-		channel.waiters.Range(func(k, v interface{}) bool {
-			channel.waiters.Delete(k)
-			return true
-		})
-	}()
+
+	defer channel.waiters.clear()
+
+	var replyCounter uint32
 
 	for {
 		m, err := channel.underlay.Rx()
@@ -433,8 +292,9 @@ func (channel *channelImpl) rxer() {
 			}
 			return
 		}
-		channel.lastActivity = info.NowInMilliseconds()
-		atomic.StoreInt64(&channel.lastRead, channel.lastActivity)
+
+		now := info.NowInMilliseconds()
+		atomic.StoreInt64(&channel.lastRead, now)
 
 		for _, transformHandler := range channel.transformHandlers {
 			transformHandler.Rx(m, channel)
@@ -446,17 +306,19 @@ func (channel *channelImpl) rxer() {
 
 		handled := false
 		if m.IsReply() {
+			replyCounter++
+			if replyCounter%100 == 0 && channel.waiters.Size() > 1000 {
+				channel.waiters.reapExpired(now)
+			}
 			replyFor := m.ReplyFor()
-			if tmp, found := channel.waiters.Load(replyFor); found {
+			if replyCh := channel.waiters.RemoveWaiter(replyFor); replyCh != nil {
 				log.Tracef("waiter found for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
 
-				waiter := tmp.(chan *Message)
 				select {
-				case waiter <- m:
+				case replyCh <- m:
 				default:
 					log.Warnf("unable to notify waiter of response. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
 				}
-				channel.waiters.Delete(replyFor)
 				handled = true
 			} else {
 				log.Debugf("no waiter for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
@@ -464,19 +326,17 @@ func (channel *channelImpl) rxer() {
 		}
 
 		if !handled {
-			channel.channelLock.RLock()
+			receiveHandlers := channel.receiveHandlers.getMap()
 
-			if receiveHandler, found := channel.receiveHandlers[m.ContentType]; found {
+			if receiveHandler, found := receiveHandlers[m.ContentType]; found {
 				receiveHandler.HandleReceive(m, channel)
 
-			} else if anyHandler, found := channel.receiveHandlers[AnyContentType]; found {
+			} else if anyHandler, found := receiveHandlers[AnyContentType]; found {
 				anyHandler.HandleReceive(m, channel)
 
 			} else {
 				log.Warnf("dropped message [%d]", m.ContentType)
 			}
-
-			channel.channelLock.RUnlock()
 		}
 	}
 }
@@ -515,39 +375,52 @@ func (channel *channelImpl) txer() {
 		}
 
 		for channel.outPriority.Len() > 0 {
-			pm := heap.Pop(channel.outPriority).(*priorityMessage)
-			m := pm.m
+			sendCtx := heap.Pop(channel.outPriority).(SendContext)
+
+			if err := sendCtx.Context().Err(); err != nil {
+				sendCtx.NotifyErr(err)
+				continue
+			}
+
+			sendCtx.NotifyBeforeWrite()
+
+			m := sendCtx.Msg()
 
 			for _, transformHandler := range channel.transformHandlers {
 				transformHandler.Tx(m, channel)
 			}
 
-			syncCh := channel.getSyncer(m)
-			var syncErr error = nil
-			if err := channel.underlay.Tx(m); err != nil {
-				log.Errorf("error tx (%s)", err)
-				syncErr = err
-				done = true
-			}
-			channel.lastActivity = info.NowInMilliseconds()
+			channel.waiters.AddWaiter(sendCtx)
 
-			for _, peekHandler := range channel.peekHandlers {
-				peekHandler.Tx(m, channel)
-			}
-
-			if syncCh != nil {
-				select {
-				case syncCh <- syncErr:
-				default:
-					log.Warn("unable to notify syncer")
+			var err error
+			if timeout := channel.options.WriteTimeout; timeout > 0 {
+				if err = channel.underlay.SetWriteTimeout(timeout); err != nil {
+					log.WithError(err).Errorf("unable to set write timeout")
+					sendCtx.NotifyErr(err)
+					done = true
 				}
-
 			}
-			if syncErr != nil {
+
+			if !done {
+				err = channel.underlay.Tx(m)
+				if err != nil {
+					log.WithError(err).Errorf("write error")
+					sendCtx.NotifyErr(err)
+					done = true
+				} else {
+					for _, peekHandler := range channel.peekHandlers {
+						peekHandler.Tx(m, channel)
+					}
+				}
+			}
+
+			if err != nil {
 				for _, errorHandler := range channel.errorHandlers {
-					errorHandler.HandleError(syncErr, channel)
+					errorHandler.HandleError(err, channel)
 				}
 			}
+
+			sendCtx.NotifyAfterWrite()
 		}
 
 		if done {
@@ -560,59 +433,94 @@ func (channel *channelImpl) stampSequence(m *Message) {
 	m.sequence = int32(channel.sequence.Next())
 }
 
-func (channel *channelImpl) getSyncer(m *Message) chan error {
-	if syncCh, found := channel.syncers.Load(m.sequence); found {
-		channel.syncers.Delete(m.sequence)
-		return syncCh.(chan error)
+func (ch *channelImpl) GetTimeSinceLastRead() time.Duration {
+	return time.Duration(info.NowInMilliseconds()-atomic.LoadInt64(&ch.lastRead)) * time.Millisecond
+}
+
+func NewReceiveHandlerCopyOnWriteMap() *receiveHandlerCopyOnWriteMap {
+	result := &receiveHandlerCopyOnWriteMap{}
+	result.value.Store(map[int32]ReceiveHandler{})
+	return result
+}
+
+type receiveHandlerCopyOnWriteMap struct {
+	value atomic.Value
+	lock  sync.Mutex
+}
+
+func (m *receiveHandlerCopyOnWriteMap) put(value ReceiveHandler) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	var current = m.value.Load().(map[int32]ReceiveHandler)
+	mapCopy := map[int32]ReceiveHandler{}
+	for k, v := range current {
+		mapCopy[k] = v
+	}
+	mapCopy[value.ContentType()] = value
+	m.value.Store(mapCopy)
+}
+
+func (m *receiveHandlerCopyOnWriteMap) getMap() map[int32]ReceiveHandler {
+	var current = m.value.Load().(map[int32]ReceiveHandler)
+	return current
+}
+
+type waiter struct {
+	replyCh chan<- *Message
+	ttlMs   int64
+}
+
+type waiterMap struct {
+	m    sync.Map
+	size int32
+}
+
+func (self *waiterMap) Size() int32 {
+	return atomic.LoadInt32(&self.size)
+}
+
+func (self *waiterMap) AddWaiter(sendCtx SendContext) {
+	if replyCh := sendCtx.ReplyChan(); replyCh != nil {
+		w := &waiter{
+			replyCh: replyCh,
+		}
+
+		if deadline, hasDeadline := sendCtx.Context().Deadline(); hasDeadline {
+			w.ttlMs = deadline.UnixMilli()
+		} else {
+			w.ttlMs = info.NowInMilliseconds() + 30_000
+		}
+
+		self.m.Store(sendCtx.Msg().Sequence(), w)
+		atomic.AddInt32(&self.size, 1)
+	}
+}
+
+func (self *waiterMap) RemoveWaiter(seq int32) chan<- *Message {
+	if result, found := self.m.LoadAndDelete(seq); found {
+		w := result.(*waiter)
+		atomic.AddInt32(&self.size, -1)
+		return w.replyCh
 	}
 	return nil
 }
 
-func (channel *channelImpl) keepalive() {
-	log := pfxlog.ContextLogger(channel.Label())
-	log.Debug("started")
-	defer log.Debug("exited")
-	defer func() { _ = channel.Close() }()
-
-	for {
-		time.Sleep(1 * time.Second)
-		if channel.IsClosed() {
-			return
+func (self *waiterMap) reapExpired(now int64) {
+	var deleteCount int32
+	self.m.Range(func(key, value interface{}) bool {
+		if w, ok := value.(*waiter); !ok || w.ttlMs < now {
+			self.m.Delete(key)
+			deleteCount++
 		}
-
-		now := info.NowInMilliseconds()
-		if now-channel.lastActivity > 15000 {
-			request := NewMessage(ContentTypePingType, nil)
-			waitCh, err := channel.SendAndWaitWithPriority(request, High)
-			if err == nil {
-				select {
-				case response := <-waitCh:
-					if response != nil {
-						if response.ContentType == ContentTypeResultType {
-							result := UnmarshalResult(response)
-							if !result.Success {
-								log.Error("failed ping response")
-							} else {
-								log.Debug("ping success")
-							}
-						} else {
-							log.Errorf("unexpected ping response [%d]", response.ContentType)
-						}
-					} else {
-						log.Error("wait channel closed")
-						return
-					}
-				case <-time.After(time.Millisecond * 10000):
-					log.Error("ping timeout")
-					return
-				}
-			} else {
-				log.Errorf("unexpected error (%s)", err)
-			}
-		}
-	}
+		return true
+	})
+	atomic.AddInt32(&self.size, -deleteCount)
 }
 
-func (ch *channelImpl) GetTimeSinceLastRead() time.Duration {
-	return time.Duration(info.NowInMilliseconds()-atomic.LoadInt64(&ch.lastRead)) * time.Millisecond
+func (self *waiterMap) clear() {
+	self.m.Range(func(k, v interface{}) bool {
+		self.m.Delete(k)
+		return true
+	})
 }

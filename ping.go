@@ -32,7 +32,7 @@ func (h *pingHandler) HandleReceive(msg *Message, ch Channel) {
 	response := NewResult(true, "")
 	response.ReplyTo(msg)
 
-	if err := ch.SendWithPriority(response, High); err != nil {
-		pfxlog.ContextLogger(ch.Label()).Errorf("error sending ping response (%s)", err)
+	if err := ch.Send(response.WithPriority(High)); err != nil {
+		pfxlog.ContextLogger(ch.Label()).WithError(err).Error("error sending ping response")
 	}
 }

@@ -18,12 +18,14 @@ package channel
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"github.com/golang/protobuf/proto"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/pkg/errors"
 	"io"
+	"time"
 )
 
 /**
@@ -233,11 +235,6 @@ func (self Headers) GetStringHeader(key int32) (string, bool) {
 	return string(encoded), ok
 }
 
-type Message struct {
-	MessageHeader
-	Body []byte
-}
-
 func NewMessage(contentType int32, body []byte) *Message {
 	return &Message{
 		MessageHeader: MessageHeader{
@@ -247,6 +244,33 @@ func NewMessage(contentType int32, body []byte) *Message {
 		},
 		Body: body,
 	}
+}
+
+type Message struct {
+	MessageHeader
+	Body []byte
+}
+
+func (m *Message) Msg() *Message {
+	return m
+}
+
+func (m *Message) Context() context.Context {
+	return context.Background()
+}
+
+func (m *Message) Priority() Priority {
+	return Standard
+}
+
+func (m *Message) NotifyBeforeWrite() {}
+
+func (m *Message) NotifyAfterWrite() {}
+
+func (m *Message) NotifyErr(error) {}
+
+func (m *Message) ReplyChan() chan<- *Message {
+	return nil
 }
 
 func (m *Message) ReplyTo(o *Message) {
@@ -264,6 +288,24 @@ func (m *Message) String() string {
 		return fmt.Sprintf("//ct:[%4d]/sq:[%4d]/rf:[%4d]/l:[%4d]", m.ContentType, m.sequence, m.replyFor, len(m.Body))
 	} else {
 		return fmt.Sprintf("//ct:[%4d]/sq:[%4d]/rf:[    ]/l:[%4d]", m.ContentType, m.sequence, len(m.Body))
+	}
+}
+
+func (m *Message) WithPriority(p Priority) SendContext {
+	return &MutableSendContext{
+		Message: m,
+		p:       p,
+		context: context.Background(),
+	}
+}
+
+func (m *Message) WithTimeout(duration time.Duration) TimeoutSendContext {
+	ctx, cancelF := context.WithTimeout(context.Background(), duration)
+	return &MutableSendContext{
+		Message: m,
+		p:       Standard,
+		context: ctx,
+		cancelF: cancelF,
 	}
 }
 

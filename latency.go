@@ -39,8 +39,8 @@ func (h *LatencyHandler) HandleReceive(msg *Message, ch Channel) {
 			defer atomic.AddInt32(&h.responses, -1)
 			response := NewResult(true, "")
 			response.ReplyTo(msg)
-			if err := ch.SendWithPriority(response, High); err != nil {
-				pfxlog.ContextLogger(ch.Label()).Errorf("error sending latency response (%s)", err)
+			if err := ch.Send(response.WithPriority(High)); err != nil {
+				pfxlog.ContextLogger(ch.Label()).WithError(err).Errorf("error sending latency response")
 			}
 		}()
 	} else {
