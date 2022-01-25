@@ -110,14 +110,6 @@ func (ch *NoopTestChannel) SendAndWaitWithPriority(*Message, Priority) (chan *Me
 	panic("implement SendAndWaitWithPriority")
 }
 
-func (ch *NoopTestChannel) SendForReply(TypedMessage, time.Duration) (*Message, error) {
-	panic("implement SendForReply")
-}
-
-func (ch *NoopTestChannel) SendForReplyAndDecode(TypedMessage, time.Duration, TypedMessage) error {
-	return nil
-}
-
 func (ch *NoopTestChannel) Close() error {
 	panic("implement Close")
 }

@@ -43,7 +43,7 @@ type channelImpl struct {
 	underlay          Underlay
 	options           *Options
 	sequence          *sequence.Sequence
-	outQueue          chan SendContext
+	outQueue          chan Sendable
 	outPriority       *priorityHeap
 	waiters           waiterMap
 	flags             concurrenz.AtomicBitSet
@@ -66,7 +66,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 		logicalName:     logicalName,
 		options:         options,
 		sequence:        sequence.NewSequence(),
-		outQueue:        make(chan SendContext, 4),
+		outQueue:        make(chan Sendable, 4),
 		outPriority:     &priorityHeap{},
 		receiveHandlers: NewReceiveHandlerCopyOnWriteMap(),
 		closeNotify:     make(chan struct{}),
@@ -116,7 +116,7 @@ func acceptAsync(logicalName string, underlay Underlay, options *Options) {
 		logicalName:     logicalName,
 		options:         options,
 		sequence:        sequence.NewSequence(),
-		outQueue:        make(chan SendContext, 4),
+		outQueue:        make(chan Sendable, 4),
 		outPriority:     &priorityHeap{},
 		receiveHandlers: NewReceiveHandlerCopyOnWriteMap(),
 	}
@@ -227,18 +227,18 @@ func (channel *channelImpl) IsClosed() bool {
 	return channel.flags.IsSet(FlagClosed)
 }
 
-func (channel *channelImpl) Send(sendCtx SendContext) error {
-	if err := sendCtx.Context().Err(); err != nil {
+func (channel *channelImpl) Send(s Sendable) error {
+	if err := s.Context().Err(); err != nil {
 		return err
 	}
-	channel.stampSequence(sendCtx.Msg())
+	channel.stampSequence(s.Msg())
 
 	select {
-	case <-sendCtx.Context().Done():
+	case <-s.Context().Done():
 		return errors.Errorf("msg send queuing failed")
 	case <-channel.closeNotify:
 		return errors.New("channel closed")
-	case channel.outQueue <- sendCtx:
+	case channel.outQueue <- s:
 	}
 	return nil
 }
@@ -311,14 +311,9 @@ func (channel *channelImpl) rxer() {
 				channel.waiters.reapExpired(now)
 			}
 			replyFor := m.ReplyFor()
-			if replyCh := channel.waiters.RemoveWaiter(replyFor); replyCh != nil {
+			if replyReceiver := channel.waiters.RemoveWaiter(replyFor); replyReceiver != nil {
 				log.Tracef("waiter found for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
-
-				select {
-				case replyCh <- m:
-				default:
-					log.Warnf("unable to notify waiter of response. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
-				}
+				replyReceiver.AcceptReply(m)
 				handled = true
 			} else {
 				log.Debugf("no waiter for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
@@ -375,28 +370,28 @@ func (channel *channelImpl) txer() {
 		}
 
 		for channel.outPriority.Len() > 0 {
-			sendCtx := heap.Pop(channel.outPriority).(SendContext)
+			sendable := heap.Pop(channel.outPriority).(Sendable)
+			sendListener := sendable.SendListener()
+			m := sendable.Msg()
 
-			if err := sendCtx.Context().Err(); err != nil {
-				sendCtx.NotifyErr(err)
+			if err := sendable.Context().Err(); err != nil {
+				sendListener.NotifyErr(m, TimeoutError{err})
 				continue
 			}
 
-			sendCtx.NotifyBeforeWrite()
-
-			m := sendCtx.Msg()
+			sendListener.NotifyBeforeWrite(m)
 
 			for _, transformHandler := range channel.transformHandlers {
 				transformHandler.Tx(m, channel)
 			}
 
-			channel.waiters.AddWaiter(sendCtx)
+			channel.waiters.AddWaiter(sendable)
 
 			var err error
 			if timeout := channel.options.WriteTimeout; timeout > 0 {
 				if err = channel.underlay.SetWriteTimeout(timeout); err != nil {
 					log.WithError(err).Errorf("unable to set write timeout")
-					sendCtx.NotifyErr(err)
+					sendListener.NotifyErr(m, err)
 					done = true
 				}
 			}
@@ -405,7 +400,7 @@ func (channel *channelImpl) txer() {
 				err = channel.underlay.Tx(m)
 				if err != nil {
 					log.WithError(err).Errorf("write error")
-					sendCtx.NotifyErr(err)
+					sendListener.NotifyErr(m, err)
 					done = true
 				} else {
 					for _, peekHandler := range channel.peekHandlers {
@@ -420,7 +415,7 @@ func (channel *channelImpl) txer() {
 				}
 			}
 
-			sendCtx.NotifyAfterWrite()
+			sendListener.NotifyAfterWrite(m)
 		}
 
 		if done {
@@ -467,8 +462,8 @@ func (m *receiveHandlerCopyOnWriteMap) getMap() map[int32]ReceiveHandler {
 }
 
 type waiter struct {
-	replyCh chan<- *Message
-	ttlMs   int64
+	replyReceiver ReplyReceiver
+	ttlMs         int64
 }
 
 type waiterMap struct {
@@ -480,28 +475,28 @@ func (self *waiterMap) Size() int32 {
 	return atomic.LoadInt32(&self.size)
 }
 
-func (self *waiterMap) AddWaiter(sendCtx SendContext) {
-	if replyCh := sendCtx.ReplyChan(); replyCh != nil {
+func (self *waiterMap) AddWaiter(sendable Sendable) {
+	if replyReceiver := sendable.ReplyReceiver(); replyReceiver != nil {
 		w := &waiter{
-			replyCh: replyCh,
+			replyReceiver: replyReceiver,
 		}
 
-		if deadline, hasDeadline := sendCtx.Context().Deadline(); hasDeadline {
+		if deadline, hasDeadline := sendable.Context().Deadline(); hasDeadline {
 			w.ttlMs = deadline.UnixMilli()
 		} else {
 			w.ttlMs = info.NowInMilliseconds() + 30_000
 		}
 
-		self.m.Store(sendCtx.Msg().Sequence(), w)
+		self.m.Store(sendable.Msg().Sequence(), w)
 		atomic.AddInt32(&self.size, 1)
 	}
 }
 
-func (self *waiterMap) RemoveWaiter(seq int32) chan<- *Message {
+func (self *waiterMap) RemoveWaiter(seq int32) ReplyReceiver {
 	if result, found := self.m.LoadAndDelete(seq); found {
 		w := result.(*waiter)
 		atomic.AddInt32(&self.size, -1)
-		return w.replyCh
+		return w.replyReceiver
 	}
 	return nil
 }

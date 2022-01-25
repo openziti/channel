@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/golang/protobuf/proto"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/pkg/errors"
 	"io"
@@ -251,8 +250,42 @@ type Message struct {
 	Body []byte
 }
 
+func (m *Message) Send(ch Channel) error {
+	return ch.Send(m)
+}
+
+func (m *Message) ToSendable() Sendable {
+	return m
+}
+
+func (m *Message) SendListener() SendListener {
+	return DefaultSendListener{}
+}
+
+func (m *Message) ReplyReceiver() ReplyReceiver {
+	return nil
+}
+
 func (m *Message) Msg() *Message {
 	return m
+}
+
+func (m *Message) WithPriority(p Priority) Envelope {
+	return &envelopeImpl{
+		msg:     m,
+		p:       p,
+		context: context.Background(),
+	}
+}
+
+func (m *Message) WithTimeout(duration time.Duration) TimeoutEnvelope {
+	ctx, cancelF := context.WithTimeout(context.Background(), duration)
+	return &envelopeImpl{
+		msg:     m,
+		p:       Standard,
+		context: ctx,
+		cancelF: cancelF,
+	}
 }
 
 func (m *Message) Context() context.Context {
@@ -261,16 +294,6 @@ func (m *Message) Context() context.Context {
 
 func (m *Message) Priority() Priority {
 	return Standard
-}
-
-func (m *Message) NotifyBeforeWrite() {}
-
-func (m *Message) NotifyAfterWrite() {}
-
-func (m *Message) NotifyErr(error) {}
-
-func (m *Message) ReplyChan() chan<- *Message {
-	return nil
 }
 
 func (m *Message) ReplyTo(o *Message) {
@@ -288,24 +311,6 @@ func (m *Message) String() string {
 		return fmt.Sprintf("//ct:[%4d]/sq:[%4d]/rf:[%4d]/l:[%4d]", m.ContentType, m.sequence, m.replyFor, len(m.Body))
 	} else {
 		return fmt.Sprintf("//ct:[%4d]/sq:[%4d]/rf:[    ]/l:[%4d]", m.ContentType, m.sequence, len(m.Body))
-	}
-}
-
-func (m *Message) WithPriority(p Priority) SendContext {
-	return &MutableSendContext{
-		Message: m,
-		p:       p,
-		context: context.Background(),
-	}
-}
-
-func (m *Message) WithTimeout(duration time.Duration) TimeoutSendContext {
-	ctx, cancelF := context.WithTimeout(context.Background(), duration)
-	return &MutableSendContext{
-		Message: m,
-		p:       Standard,
-		context: ctx,
-		cancelF: cancelF,
 	}
 }
 
@@ -643,9 +648,4 @@ func getRetryVersionFor(err error, defaultVersion uint32, localVersions ...uint3
 
 	log.Infof("defaulting to version %v", defaultVersion)
 	return defaultVersion, false
-}
-
-type TypedMessage interface {
-	proto.Message
-	GetContentType() int32
 }

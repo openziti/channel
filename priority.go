@@ -25,7 +25,7 @@ const (
 	Low      = 10240
 )
 
-type priorityHeap []SendContext
+type priorityHeap []Sendable
 
 func (pq priorityHeap) Len() int {
 	return len(pq)
@@ -47,7 +47,7 @@ func (pq priorityHeap) Swap(i, j int) {
 }
 
 func (pq *priorityHeap) Push(x interface{}) {
-	pm := x.(SendContext)
+	pm := x.(Sendable)
 	*pq = append(*pq, pm)
 }
 

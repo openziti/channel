@@ -21,11 +21,12 @@ import (
 	"crypto/x509"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/foundation/transport"
+	"github.com/pkg/errors"
 	"io"
 	"time"
 )
 
-// Channel represents an asyncronous, message-passing framework, designed to sit on top of an underlay.
+// Channel represents an asynchronous, message-passing framework, designed to sit on top of an underlay.
 //
 type Channel interface {
 	Identity
@@ -39,23 +40,73 @@ type Channel interface {
 	GetTimeSinceLastRead() time.Duration
 }
 
-type SendContext interface {
-	Msg() *Message
-	Priority() Priority
-	WithPriority(p Priority) SendContext
-	Context() context.Context
-	WithTimeout(duration time.Duration) TimeoutSendContext
-	NotifyBeforeWrite()
-	NotifyAfterWrite()
-	NotifyErr(err error)
-	ReplyChan() chan<- *Message
+type Sender interface {
+	Send(s Sendable) error
 }
 
-type TimeoutSendContext interface {
-	SendContext
+// Sendable encapsulates all the data and callbacks that a Channel requires when sending a Message.
+type Sendable interface {
+	// Msg return the Message to send
+	Msg() *Message
+
+	// Priority returns the Priority of the Message
+	Priority() Priority
+
+	// Context returns the Context used for timeouts/cancelling message sends, etc
+	Context() context.Context
+
+	// SendListener returns the SendListener to invoke at each stage of the send operation
+	SendListener() SendListener
+
+	// ReplyReceiver returns the ReplyReceiver to be invoked when a reply for the message or received, or nil if
+	// no ReplyReceiver should be invoked if or when a reply is received
+	ReplyReceiver() ReplyReceiver
+}
+
+// Envelope allow setting message priority and context. Message is an Envelope (as well as a Sendable)
+type Envelope interface {
+	// WithPriority returns an Envelope with the given priority
+	WithPriority(p Priority) Envelope
+
+	// WithTimeout returns a TimeoutEnvelope with a context using the given timeout
+	WithTimeout(duration time.Duration) TimeoutEnvelope
+
+	// Send sends the envelope on the given Channel
+	Send(ch Channel) error
+
+	// ToSendable converts the Envelope into a Sendable, which can be submitted to a Channel for sending
+	ToSendable() Sendable
+}
+
+// TimeoutEnvelope has timeout related convenience methods, such as waiting for a Message to be written to
+// the wire or waiting for a Message reply
+type TimeoutEnvelope interface {
+	Envelope
+
+	// SendAndWaitForWire will wait until the configured timeout or until the message is sent, whichever comes first
+	// If the timeout happens first, the context error will be returned, wrapped by a TimeoutError
 	SendAndWaitForWire(ch Channel) error
+
+	// SendForReply will wait until the configured timeout or until a reply is received, whichever comes first
+	// If the timeout happens first, the context error will be returned, wrapped by a TimeoutError
 	SendForReply(ch Channel) (*Message, error)
-	SendForTypedReply(ch Channel, result TypedMessage) error
+}
+
+// SendListener is notified at the various stages of a message send
+type SendListener interface {
+	// Notify Queued is called when the message has been queued for send
+	NotifyQueued(*Message)
+	// NotifyBeforeWrite is called before send is called
+	NotifyBeforeWrite(*Message)
+	// NotifyAfterWrite is called after the message has been written to the Underlay
+	NotifyAfterWrite(*Message)
+	// NotifyErr is called if the Sendable context errors before send or if writing to the Underlay fails
+	NotifyErr(*Message, error)
+}
+
+// ReplyReceiver is used to get notified when a Message
+type ReplyReceiver interface {
+	AcceptReply(*Message)
 }
 
 type Identity interface {
@@ -109,12 +160,21 @@ type Underlay interface {
 	SetWriteTimeout(duration time.Duration) error
 }
 
-type Sender interface {
-	Send(sendCtx SendContext) error
-}
-
 const AnyContentType = -1
 const HelloSequence = -1
+
+// TimeoutError is used to indicate a timeout happened
+type TimeoutError struct {
+	error
+}
+
+func (self TimeoutError) Unwrap() error {
+	return self.error
+}
+
+func IsTimeout(err error) bool {
+	return errors.As(err, &TimeoutError{})
+}
 
 var ListenerClosedError = listenerClosedError{}
 
@@ -123,3 +183,13 @@ type listenerClosedError struct{}
 func (err listenerClosedError) Error() string {
 	return "closed"
 }
+
+type DefaultSendListener struct{}
+
+func (self DefaultSendListener) NotifyQueued(*Message) {}
+
+func (self DefaultSendListener) NotifyBeforeWrite(*Message) {}
+
+func (self DefaultSendListener) NotifyAfterWrite(*Message) {}
+
+func (self DefaultSendListener) NotifyErr(*Message, error) {}
