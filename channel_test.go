@@ -371,7 +371,7 @@ func NewBlockingContext(wrapped Sendable) *BlockingSendable {
 
 type BlockingSendable struct {
 	Sendable
-	DefaultSendListener
+	BaseSendListener
 	notify     chan struct{}
 	isBlocking chan struct{}
 }
@@ -418,7 +418,7 @@ func NewNotifySendable(wrapped Sendable) *NotifySendable {
 
 type NotifySendable struct {
 	Sendable
-	DefaultSendListener
+	BaseSendListener
 	notify chan Sendable
 }
 

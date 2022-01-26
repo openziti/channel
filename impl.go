@@ -231,7 +231,8 @@ func (channel *channelImpl) Send(s Sendable) error {
 	if err := s.Context().Err(); err != nil {
 		return err
 	}
-	channel.stampSequence(s.Msg())
+
+	s.SetSequence(int32(channel.sequence.Next()))
 
 	select {
 	case <-s.Context().Done():
@@ -347,19 +348,23 @@ func (channel *channelImpl) txer() {
 		done := false
 		selecting := true
 
+		count := 0
+
 		pm, ok := <-channel.outQueue
 		if ok {
 			heap.Push(channel.outPriority, pm)
+			count++
 		} else {
 			done = true
 			selecting = false
 		}
 
-		for selecting {
+		for selecting && count < 64 {
 			select {
 			case pm, ok := <-channel.outQueue:
 				if ok {
 					heap.Push(channel.outPriority, pm)
+					count++
 				} else {
 					done = true
 					selecting = false
@@ -375,11 +380,15 @@ func (channel *channelImpl) txer() {
 			m := sendable.Msg()
 
 			if err := sendable.Context().Err(); err != nil {
-				sendListener.NotifyErr(m, TimeoutError{err})
+				sendListener.NotifyErr(TimeoutError{err})
 				continue
 			}
 
-			sendListener.NotifyBeforeWrite(m)
+			sendListener.NotifyBeforeWrite()
+
+			if m == nil { // allow nil message in Sendable so we can send tracers to check time from send to write
+				continue
+			}
 
 			for _, transformHandler := range channel.transformHandlers {
 				transformHandler.Tx(m, channel)
@@ -391,7 +400,7 @@ func (channel *channelImpl) txer() {
 			if timeout := channel.options.WriteTimeout; timeout > 0 {
 				if err = channel.underlay.SetWriteTimeout(timeout); err != nil {
 					log.WithError(err).Errorf("unable to set write timeout")
-					sendListener.NotifyErr(m, err)
+					sendListener.NotifyErr(err)
 					done = true
 				}
 			}
@@ -400,7 +409,7 @@ func (channel *channelImpl) txer() {
 				err = channel.underlay.Tx(m)
 				if err != nil {
 					log.WithError(err).Errorf("write error")
-					sendListener.NotifyErr(m, err)
+					sendListener.NotifyErr(err)
 					done = true
 				} else {
 					for _, peekHandler := range channel.peekHandlers {
@@ -415,17 +424,13 @@ func (channel *channelImpl) txer() {
 				}
 			}
 
-			sendListener.NotifyAfterWrite(m)
+			sendListener.NotifyAfterWrite()
 		}
 
 		if done {
 			return
 		}
 	}
-}
-
-func (channel *channelImpl) stampSequence(m *Message) {
-	m.sequence = int32(channel.sequence.Next())
 }
 
 func (ch *channelImpl) GetTimeSinceLastRead() time.Duration {

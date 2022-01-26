@@ -250,6 +250,10 @@ type Message struct {
 	Body []byte
 }
 
+func (m *Message) SetSequence(seq int32) {
+	m.sequence = seq
+}
+
 func (m *Message) Send(ch Channel) error {
 	return ch.Send(m)
 }
@@ -259,7 +263,7 @@ func (m *Message) ToSendable() Sendable {
 }
 
 func (m *Message) SendListener() SendListener {
-	return DefaultSendListener{}
+	return BaseSendListener{}
 }
 
 func (m *Message) ReplyReceiver() ReplyReceiver {
@@ -271,11 +275,7 @@ func (m *Message) Msg() *Message {
 }
 
 func (m *Message) WithPriority(p Priority) Envelope {
-	return &envelopeImpl{
-		msg:     m,
-		p:       p,
-		context: context.Background(),
-	}
+	return &priorityEnvelopeImpl{msg: m, p: p}
 }
 
 func (m *Message) WithTimeout(duration time.Duration) TimeoutEnvelope {

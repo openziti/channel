@@ -13,6 +13,14 @@ type priorityEnvelopeImpl struct {
 	p   Priority
 }
 
+func (self *priorityEnvelopeImpl) SetSequence(seq int32) {
+	self.msg.SetSequence(seq)
+}
+
+func (self *priorityEnvelopeImpl) Sequence() int32 {
+	return self.msg.sequence
+}
+
 func (self *priorityEnvelopeImpl) Send(ch Channel) error {
 	return ch.Send(self)
 }
@@ -63,6 +71,14 @@ type envelopeImpl struct {
 	cancelF context.CancelFunc
 }
 
+func (self *envelopeImpl) SetSequence(seq int32) {
+	self.msg.SetSequence(seq)
+}
+
+func (self *envelopeImpl) Sequence() int32 {
+	return self.msg.sequence
+}
+
 func (self *envelopeImpl) Msg() *Message {
 	return self.msg
 }
@@ -79,17 +95,17 @@ func (self *envelopeImpl) SendListener() SendListener {
 	return self
 }
 
-func (self *envelopeImpl) NotifyQueued(*Message) {}
+func (self *envelopeImpl) NotifyQueued() {}
 
-func (self *envelopeImpl) NotifyBeforeWrite(*Message) {}
+func (self *envelopeImpl) NotifyBeforeWrite() {}
 
-func (self *envelopeImpl) NotifyAfterWrite(*Message) {
+func (self *envelopeImpl) NotifyAfterWrite() {
 	if self.cancelF != nil {
 		self.cancelF()
 	}
 }
 
-func (self *envelopeImpl) NotifyErr(*Message, error) {}
+func (self *envelopeImpl) NotifyErr(error) {}
 
 func (self *envelopeImpl) Priority() Priority {
 	return self.p
@@ -140,11 +156,11 @@ func (self *SendWaitEnvelope) SendListener() SendListener {
 	return self
 }
 
-func (self *SendWaitEnvelope) NotifyAfterWrite(m *Message) {
+func (self *SendWaitEnvelope) NotifyAfterWrite() {
 	close(self.errC)
 }
 
-func (self *SendWaitEnvelope) NotifyErr(_ *Message, err error) {
+func (self *SendWaitEnvelope) NotifyErr(err error) {
 	self.errC <- err
 }
 
@@ -189,7 +205,7 @@ func (self *ReplyEnvelope) ReplyReceiver() ReplyReceiver {
 	return self
 }
 
-func (self *ReplyEnvelope) NotifyAfterWrite(m *Message) {}
+func (self *ReplyEnvelope) NotifyAfterWrite() {}
 
 func (self *ReplyEnvelope) AcceptReply(message *Message) {
 	select {
@@ -203,7 +219,7 @@ func (self *ReplyEnvelope) AcceptReply(message *Message) {
 	}
 }
 
-func (self *ReplyEnvelope) NotifyErr(_ *Message, err error) {
+func (self *ReplyEnvelope) NotifyErr(err error) {
 	self.errC <- err
 }
 
@@ -244,6 +260,12 @@ type ErrorEnvelope struct {
 	ctx context.Context
 }
 
+func (self *ErrorEnvelope) SetSequence(seq int32) {}
+
+func (self *ErrorEnvelope) Sequence() int32 {
+	return 0
+}
+
 func (self *ErrorEnvelope) Msg() *Message {
 	return nil
 }
@@ -257,7 +279,7 @@ func (self *ErrorEnvelope) Context() context.Context {
 }
 
 func (self *ErrorEnvelope) SendListener() SendListener {
-	return DefaultSendListener{}
+	return BaseSendListener{}
 }
 
 func (self *ErrorEnvelope) ReplyReceiver() ReplyReceiver {
@@ -314,7 +336,7 @@ func (self *ErrorContext) Err() error {
 	return self.err
 }
 
-func (self *ErrorContext) Value(key interface{}) interface{} {
+func (self *ErrorContext) Value(interface{}) interface{} {
 	// ignore for now. may need an implementation at some point
 	pfxlog.Logger().Error("ErrorContext.Value called, but not implemented!!!")
 	return nil

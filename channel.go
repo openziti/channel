@@ -49,6 +49,12 @@ type Sendable interface {
 	// Msg return the Message to send
 	Msg() *Message
 
+	// SetSequence sets a sequence number indicating in which order the message was received
+	SetSequence(seq int32)
+
+	// Sequence returns the sequence number
+	Sequence() int32
+
 	// Priority returns the Priority of the Message
 	Priority() Priority
 
@@ -95,13 +101,13 @@ type TimeoutEnvelope interface {
 // SendListener is notified at the various stages of a message send
 type SendListener interface {
 	// Notify Queued is called when the message has been queued for send
-	NotifyQueued(*Message)
+	NotifyQueued()
 	// NotifyBeforeWrite is called before send is called
-	NotifyBeforeWrite(*Message)
+	NotifyBeforeWrite()
 	// NotifyAfterWrite is called after the message has been written to the Underlay
-	NotifyAfterWrite(*Message)
+	NotifyAfterWrite()
 	// NotifyErr is called if the Sendable context errors before send or if writing to the Underlay fails
-	NotifyErr(*Message, error)
+	NotifyErr(error)
 }
 
 // ReplyReceiver is used to get notified when a Message
@@ -184,12 +190,36 @@ func (err listenerClosedError) Error() string {
 	return "closed"
 }
 
-type DefaultSendListener struct{}
+// BaseSendable is a type that may be used to provide default methods for Sendable implementation
+type BaseSendable struct{}
 
-func (self DefaultSendListener) NotifyQueued(*Message) {}
+func (BaseSendable) Msg() *Message {
+	return nil
+}
 
-func (self DefaultSendListener) NotifyBeforeWrite(*Message) {}
+func (BaseSendable) Priority() Priority {
+	return Standard
+}
 
-func (self DefaultSendListener) NotifyAfterWrite(*Message) {}
+func (BaseSendable) Context() context.Context {
+	return context.Background()
+}
 
-func (self DefaultSendListener) NotifyErr(*Message, error) {}
+func (BaseSendable) SendListener() SendListener {
+	return &BaseSendListener{}
+}
+
+func (BaseSendable) ReplyReceiver() ReplyReceiver {
+	return nil
+}
+
+// BaseSendListener is a type that may be used to provide default methods for SendListener implementation
+type BaseSendListener struct{}
+
+func (BaseSendListener) NotifyQueued() {}
+
+func (BaseSendListener) NotifyBeforeWrite() {}
+
+func (BaseSendListener) NotifyAfterWrite() {}
+
+func (BaseSendListener) NotifyErr(error) {}

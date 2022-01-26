@@ -107,25 +107,35 @@ func ProbeLatencyConfigurable(config *ProbeConfig) {
 	}
 }
 
+type Type uint8
+
+const (
+	RoundTripType  Type = 1
+	BeforeSendType      = 2
+)
+
 type Handler interface {
-	LatencyReported(latency time.Duration)
+	LatencyReported(latencyType Type, latency time.Duration)
 	ChannelClosed()
 }
 
-func AddLatencyProbe(ch channel.Channel, interval time.Duration, handler Handler) {
+func AddLatencyProbe(ch channel.Channel, interval time.Duration, roundTripFreq uint8, handler Handler) {
 	probe := &latencyProbe{
-		handler:  handler,
-		ch:       ch,
-		interval: interval,
+		handler:       handler,
+		ch:            ch,
+		interval:      interval,
+		roundTripFreq: roundTripFreq,
 	}
 	ch.AddReceiveHandler(probe)
 	go probe.run()
 }
 
 type latencyProbe struct {
-	handler  Handler
-	ch       channel.Channel
-	interval time.Duration
+	handler       Handler
+	ch            channel.Channel
+	interval      time.Duration
+	roundTripFreq uint8
+	count         uint8
 }
 
 func (self *latencyProbe) ContentType() int32 {
@@ -135,27 +145,92 @@ func (self *latencyProbe) ContentType() int32 {
 func (self *latencyProbe) HandleReceive(m *channel.Message, _ channel.Channel) {
 	if sentTime, ok := m.GetUint64Header(probeTime); ok {
 		latency := time.Duration(time.Now().UnixNano() - int64(sentTime))
-		self.handler.LatencyReported(latency)
+		self.handler.LatencyReported(RoundTripType, latency)
 	} else {
 		pfxlog.Logger().Error("no send time on latency response")
 	}
 }
 
 func (self *latencyProbe) run() {
-	log := pfxlog.ContextLogger(self.ch.Label())
-	log.Debug("started")
-	defer log.Debug("exited")
-	defer self.handler.ChannelClosed()
-
-	for !self.ch.IsClosed() {
-		request := channel.NewMessage(channel.ContentTypeLatencyType, nil)
-		request.PutUint64Header(probeTime, uint64(time.Now().UnixNano()))
-		envelope := request.WithPriority(channel.High).WithTimeout(10 * time.Second)
-		if err := envelope.Send(self.ch); err != nil {
-			log.WithError(err).Error("unexpected error sending latency probe")
-		}
-		time.Sleep(self.interval)
+	if self.ch.IsClosed() {
+		pfxlog.ContextLogger(self.ch.Label()).Debug("exited")
+		self.handler.ChannelClosed()
+		return
 	}
+
+	var sendable channel.Sendable
+	if self.count == self.roundTripFreq {
+		sendable = &RoundTripLatency{
+			msg: channel.NewMessage(channel.ContentTypeLatencyType, nil),
+		}
+		self.count = 0
+	} else {
+		sendable = &SendTimeTracker{
+			handler:   self.handler,
+			startTime: time.Now(),
+		}
+	}
+	if err := self.ch.Send(sendable); err != nil {
+		pfxlog.ContextLogger(self.ch.Label()).WithError(err).Error("unexpected error sending latency probe")
+		if self.ch.IsClosed() {
+			return
+		}
+	}
+
+	self.count++
+
+	time.AfterFunc(self.interval, self.run)
+}
+
+type SendTimeTracker struct {
+	channel.BaseSendable
+	channel.BaseSendListener
+	handler   Handler
+	startTime time.Time
+	seq       int32
+}
+
+func (self *SendTimeTracker) SetSequence(seq int32) {
+	self.seq = seq
+}
+
+func (self *SendTimeTracker) Sequence() int32 {
+	return self.seq
+}
+
+func (self *SendTimeTracker) SendListener() channel.SendListener {
+	return self
+}
+
+func (self *SendTimeTracker) NotifyBeforeWrite() {
+	t := time.Now().Sub(self.startTime)
+	self.handler.LatencyReported(BeforeSendType, t)
+}
+
+type RoundTripLatency struct {
+	msg *channel.Message
+	channel.BaseSendable
+	channel.BaseSendListener
+}
+
+func (self *RoundTripLatency) SetSequence(seq int32) {
+	self.msg.SetSequence(seq)
+}
+
+func (self *RoundTripLatency) Sequence() int32 {
+	return self.msg.Sequence()
+}
+
+func (self *RoundTripLatency) Msg() *channel.Message {
+	return self.msg
+}
+
+func (self *RoundTripLatency) SendListener() channel.SendListener {
+	return self
+}
+
+func (self *RoundTripLatency) NotifyBeforeWrite() {
+	self.msg.PutUint64Header(probeTime, uint64(time.Now().UnixNano()))
 }
 
 func AddLatencyProbeResponder(ch channel.Channel) {
