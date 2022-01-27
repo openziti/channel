@@ -243,7 +243,10 @@ func (channel *channelImpl) Send(s Sendable) error {
 
 	select {
 	case <-s.Context().Done():
-		return errors.Errorf("msg send queuing failed")
+		if err := s.Context().Err(); err != nil {
+			return TimeoutError{errors.Wrap(err, "timeout waiting for message reply")}
+		}
+		return errors.New("timeout waiting to put message in send queue")
 	case <-channel.closeNotify:
 		return errors.New("channel closed")
 	case channel.outQueue <- s:

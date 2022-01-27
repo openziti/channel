@@ -68,7 +68,7 @@ type Sendable interface {
 	ReplyReceiver() ReplyReceiver
 }
 
-// Envelope allow setting message priority and context. Message is an Envelope (as well as a Sendable)
+// Envelope allows setting message priority and context. Message is an Envelope (as well as a Sendable)
 type Envelope interface {
 	// WithPriority returns an Envelope with the given priority
 	WithPriority(p Priority) Envelope

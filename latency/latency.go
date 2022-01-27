@@ -19,7 +19,6 @@ package latency
 import (
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/channel"
-	"github.com/openziti/foundation/channel2"
 	"sync/atomic"
 	"time"
 )
@@ -81,7 +80,7 @@ func ProbeLatencyConfigurable(config *ProbeConfig) {
 			return
 		}
 
-		request := channel.NewMessage(channel2.ContentTypeLatencyType, nil)
+		request := channel.NewMessage(channel.ContentTypeLatencyType, nil)
 		request.PutUint64Header(probeTime, uint64(time.Now().UnixNano()))
 		response, err := request.WithPriority(channel.High).WithTimeout(config.Timeout).SendForReply(config.Channel)
 		if err != nil {
@@ -139,7 +138,7 @@ type latencyProbe struct {
 }
 
 func (self *latencyProbe) ContentType() int32 {
-	return channel2.ContentTypeLatencyResponseType
+	return channel.ContentTypeLatencyResponseType
 }
 
 func (self *latencyProbe) HandleReceive(m *channel.Message, _ channel.Channel) {
