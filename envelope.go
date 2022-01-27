@@ -134,37 +134,37 @@ func (self *envelopeImpl) Send(ch Channel) error {
 }
 
 func (self *envelopeImpl) SendAndWaitForWire(ch Channel) error {
-	waitSendContext := &SendWaitEnvelope{envelopeImpl: self}
+	waitSendContext := &sendWaitEnvelope{envelopeImpl: self}
 	return waitSendContext.WaitForWire(ch)
 }
 
 func (self *envelopeImpl) SendForReply(ch Channel) (*Message, error) {
-	replyContext := &ReplyEnvelope{envelopeImpl: self}
+	replyContext := &replyEnvelope{envelopeImpl: self}
 	return replyContext.WaitForReply(ch)
 }
 
-type SendWaitEnvelope struct {
+type sendWaitEnvelope struct {
 	*envelopeImpl
 	errC chan error
 }
 
-func (self *SendWaitEnvelope) ToSendable() Sendable {
+func (self *sendWaitEnvelope) ToSendable() Sendable {
 	return self
 }
 
-func (self *SendWaitEnvelope) SendListener() SendListener {
+func (self *sendWaitEnvelope) SendListener() SendListener {
 	return self
 }
 
-func (self *SendWaitEnvelope) NotifyAfterWrite() {
+func (self *sendWaitEnvelope) NotifyAfterWrite() {
 	close(self.errC)
 }
 
-func (self *SendWaitEnvelope) NotifyErr(err error) {
+func (self *sendWaitEnvelope) NotifyErr(err error) {
 	self.errC <- err
 }
 
-func (self *SendWaitEnvelope) WaitForWire(ch Channel) error {
+func (self *sendWaitEnvelope) WaitForWire(ch Channel) error {
 	if err := self.context.Err(); err != nil {
 		return err
 	}
@@ -187,27 +187,27 @@ func (self *SendWaitEnvelope) WaitForWire(ch Channel) error {
 	}
 }
 
-type ReplyEnvelope struct {
+type replyEnvelope struct {
 	*envelopeImpl
 	errC   chan error
 	replyC chan *Message
 }
 
-func (self *ReplyEnvelope) ToSendable() Sendable {
+func (self *replyEnvelope) ToSendable() Sendable {
 	return self
 }
 
-func (self *ReplyEnvelope) SendListener() SendListener {
+func (self *replyEnvelope) SendListener() SendListener {
 	return self
 }
 
-func (self *ReplyEnvelope) ReplyReceiver() ReplyReceiver {
+func (self *replyEnvelope) ReplyReceiver() ReplyReceiver {
 	return self
 }
 
-func (self *ReplyEnvelope) NotifyAfterWrite() {}
+func (self *replyEnvelope) NotifyAfterWrite() {}
 
-func (self *ReplyEnvelope) AcceptReply(message *Message) {
+func (self *replyEnvelope) AcceptReply(message *Message) {
 	select {
 	case self.replyC <- message:
 	default:
@@ -219,11 +219,11 @@ func (self *ReplyEnvelope) AcceptReply(message *Message) {
 	}
 }
 
-func (self *ReplyEnvelope) NotifyErr(err error) {
+func (self *replyEnvelope) NotifyErr(err error) {
 	self.errC <- err
 }
 
-func (self *ReplyEnvelope) WaitForReply(ch Channel) (*Message, error) {
+func (self *replyEnvelope) WaitForReply(ch Channel) (*Message, error) {
 	if err := self.context.Err(); err != nil {
 		return nil, err
 	}
