@@ -29,15 +29,24 @@ type Binding interface {
 	Bind(h BindHandler) error
 	AddPeekHandler(h PeekHandler)
 	AddTransformHandler(h TransformHandler)
-	AddReceiveHandler(h ReceiveHandler)
+	AddReceiveHandler(contentType int32, h ReceiveHandler)
+	AddReceiveHandlerF(contentType int32, h ReceiveHandlerF)
+	AddTypedReceiveHandler(h TypedReceiveHandler)
 	AddErrorHandler(h ErrorHandler)
 	AddCloseHandler(h CloseHandler)
 	SetUserData(data interface{})
 	GetUserData() interface{}
+	GetChannel() Channel
 }
 
 type BindHandler interface {
-	BindChannel(ch Channel) error
+	BindChannel(binding Binding) error
+}
+
+type BindHandlerF func(binding Binding) error
+
+func (f BindHandlerF) BindChannel(binding Binding) error {
+	return f(binding)
 }
 
 type ConnectionHandler interface {
@@ -57,8 +66,31 @@ type TransformHandler interface {
 }
 
 type ReceiveHandler interface {
-	ContentType() int32
 	HandleReceive(m *Message, ch Channel)
+}
+
+type TypedReceiveHandler interface {
+	ContentType() int32
+	ReceiveHandler
+}
+
+type ReceiveHandlerF func(m *Message, ch Channel)
+
+func (self ReceiveHandlerF) HandleReceive(m *Message, ch Channel) {
+	self(m, ch)
+}
+
+type AsyncFunctionReceiveAdapter struct {
+	Type    int32
+	Handler ReceiveHandlerF
+}
+
+func (adapter *AsyncFunctionReceiveAdapter) ContentType() int32 {
+	return adapter.Type
+}
+
+func (adapter *AsyncFunctionReceiveAdapter) HandleReceive(m *Message, ch Channel) {
+	go adapter.Handler(m, ch)
 }
 
 type ErrorHandler interface {

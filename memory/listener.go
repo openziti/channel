@@ -14,11 +14,12 @@
 	limitations under the License.
 */
 
-package channel
+package memory
 
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/foundation/transport"
 	"time"
@@ -26,20 +27,20 @@ import (
 
 type memoryListener struct {
 	identity *identity.TokenId
-	handlers []ConnectionHandler
+	handlers []channel.ConnectionHandler
 	ctx      *MemoryContext
-	created  chan Underlay
+	created  chan channel.Underlay
 }
 
-func NewMemoryListener(identity *identity.TokenId, ctx *MemoryContext) UnderlayListener {
+func NewMemoryListener(identity *identity.TokenId, ctx *MemoryContext) channel.UnderlayListener {
 	return &memoryListener{
 		identity: identity,
 		ctx:      ctx,
-		created:  make(chan Underlay),
+		created:  make(chan channel.Underlay),
 	}
 }
 
-func (listener *memoryListener) Listen(handlers ...ConnectionHandler) error {
+func (listener *memoryListener) Listen(handlers ...channel.ConnectionHandler) error {
 	go listener.listen()
 	return nil
 }
@@ -50,10 +51,10 @@ func (listener *memoryListener) Close() error {
 	return nil
 }
 
-func (listener *memoryListener) Create(_ time.Duration, _ transport.Configuration) (Underlay, error) {
+func (listener *memoryListener) Create(_ time.Duration, _ transport.Configuration) (channel.Underlay, error) {
 	impl := <-listener.created
 	if impl == nil {
-		return nil, ListenerClosedError
+		return nil, channel.ListenerClosedError
 	}
 	return impl, nil
 }
@@ -67,9 +68,9 @@ func (listener *memoryListener) listen() {
 		if request != nil {
 			log.Infof("connecting dialer [%s] and listener [%s]", request.hello.IdToken, listener.identity.Token)
 
-			if connectionId, err := globalRegistry.newConnectionId(); err == nil {
-				listenerTx := make(chan *Message)
-				dialerTx := make(chan *Message)
+			if connectionId, err := channel.NextConnectionId(); err == nil {
+				listenerTx := make(chan *channel.Message)
+				dialerTx := make(chan *channel.Message)
 
 				dialerImpl := newMemoryImpl(dialerTx, listenerTx)
 				dialerImpl.connectionId = connectionId

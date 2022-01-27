@@ -59,7 +59,7 @@ func TestSendTimeout(t *testing.T) {
 
 	msg = NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 1)))
 	err := msg.WithTimeout(100 * time.Millisecond).SendAndWaitForWire(ch)
-	req.EqualError(err, "timeout waiting for message to be written to wire")
+	req.EqualError(err, "timeout waiting for message to be written to wire: context deadline exceeded")
 
 	req.True(blockingSendContext.Unblock(100 * time.Millisecond))
 
@@ -90,7 +90,7 @@ func TestInQueueTimeout(t *testing.T) {
 	req.NoError(ch.Send(blockingSendContext))
 	req.NoError(blockingSendContext.waitForBlocked(50 * time.Millisecond))
 
-	msg2 := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0))).WithPriority(High)
+	msg2 := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0))).WithPriority(High).(*priorityEnvelopeImpl)
 	blockingSendContext2 := NewBlockingContext(msg2)
 	req.NoError(ch.Send(blockingSendContext2))
 
@@ -104,13 +104,43 @@ func TestInQueueTimeout(t *testing.T) {
 
 	msg = NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 1)))
 	err := msg.WithTimeout(100 * time.Millisecond).SendAndWaitForWire(ch)
-	req.EqualError(err, "timeout waiting for message to be written to wire")
+	req.EqualError(err, "timeout waiting for message to be written to wire: context deadline exceeded")
+	req.True(IsTimeout(err))
 
 	req.True(blockingSendContext2.Unblock(100 * time.Millisecond))
 
 	for i := 0; i < 10; i++ {
 		msg := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", i)))
 		reply, err := msg.WithTimeout(time.Second).SendForReply(ch)
+		req.NoError(err)
+		req.NotNil(reply)
+		req.Equal(string(msg.Body), string(reply.Body))
+	}
+}
+
+func TestReplyTimeout(t *testing.T) {
+	server := newEchoServer()
+	server.pingHandler = server.echoPingsWithDelay
+	server.start(t)
+	defer server.stop(t)
+
+	req := require.New(t)
+
+	options := DefaultOptions()
+	options.WriteTimeout = 100 * time.Millisecond
+
+	ch := dialServer(options, t)
+	defer func() { _ = ch.Close() }()
+
+	msg := NewMessage(ContentTypePingType, []byte("hello"))
+	reply, err := msg.WithTimeout(50 * time.Millisecond).SendForReply(ch)
+	req.Nil(reply)
+	req.EqualError(err, "timeout waiting for message reply: context deadline exceeded")
+	req.True(IsTimeout(err))
+
+	for i := 0; i < 5; i++ {
+		msg := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", i)))
+		reply, err := msg.WithTimeout(200 * time.Millisecond).SendForReply(ch)
 		req.NoError(err)
 		req.NotNil(reply)
 		req.Equal(string(msg.Body), string(reply.Body))
@@ -218,16 +248,16 @@ func TestPriorityOrdering(t *testing.T) {
 	req.NoError(ch.Send(blockingSendContext))
 	req.NoError(blockingSendContext.waitForBlocked(50 * time.Millisecond))
 
-	lowCtx := NewNotifyContext(NewMessage(ContentTypePingType, nil).WithPriority(Low))
+	lowCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Low).(*priorityEnvelopeImpl))
 	req.NoError(ch.Send(lowCtx))
 
-	stdCtx := NewNotifyContext(NewMessage(ContentTypePingType, nil).WithPriority(Standard))
+	stdCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Standard).(*priorityEnvelopeImpl))
 	req.NoError(ch.Send(stdCtx))
 
-	highCtx := NewNotifyContext(NewMessage(ContentTypePingType, nil).WithPriority(High))
+	highCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(High).(*priorityEnvelopeImpl))
 	req.NoError(ch.Send(highCtx))
 
-	highestCtx := NewNotifyContext(NewMessage(ContentTypePingType, nil).WithPriority(Highest))
+	highestCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Highest).(*priorityEnvelopeImpl))
 	req.NoError(ch.Send(highestCtx))
 
 	blockingSendContext.Unblock(10 * time.Millisecond)
@@ -299,14 +329,20 @@ func (self *echoServer) stop(t *testing.T) {
 
 func (self *echoServer) accept() {
 	counter := 0
+
+	self.options.SetBindHandlerF(func(binding Binding) error {
+		binding.AddReceiveHandlerF(ContentTypePingType, self.pingHandler)
+		return nil
+	})
+
 	for {
 		counter++
-		ch, err := NewChannel(fmt.Sprintf("echo-server-%v", counter), self.listener, self.options)
+
+		_, err := NewChannel(fmt.Sprintf("echo-server-%v", counter), self.listener, self.options)
 		if err != nil {
 			logrus.WithError(err).Error("echo listener error, exiting")
 			return
 		}
-		ch.AddReceiveHandler(&FunctionReceiveAdapter{Type: ContentTypePingType, Handler: self.pingHandler})
 	}
 }
 
@@ -318,35 +354,49 @@ func (self *echoServer) echoPings(msg *Message, ch Channel) {
 	}
 }
 
+func (self *echoServer) echoPingsWithDelay(msg *Message, ch Channel) {
+	time.Sleep(100 * time.Millisecond)
+	reply := NewResult(true, string(msg.Body))
+	reply.ReplyTo(msg)
+	if err := ch.Send(reply); err != nil {
+		logrus.WithError(err).WithField("reqSeq", msg.Sequence()).Error("error responding to request")
+	}
+}
+
 func (self *echoServer) blockOnPing(*Message, Channel) {
 	<-self.blockChan
 }
 
-func NewBlockingContext(wrapped SendContext) *BlockingContext {
-	return &BlockingContext{
-		SendContext: wrapped,
-		notify:      make(chan struct{}),
-		isBlocking:  make(chan struct{}, 1),
+func NewBlockingContext(wrapped Sendable) *BlockingSendable {
+	return &BlockingSendable{
+		Sendable:   wrapped,
+		notify:     make(chan struct{}),
+		isBlocking: make(chan struct{}, 1),
 	}
 }
 
-type BlockingContext struct {
-	SendContext
+type BlockingSendable struct {
+	Sendable
+	BaseSendListener
 	notify     chan struct{}
 	isBlocking chan struct{}
 }
 
-func (self *BlockingContext) Priority() Priority {
+func (self *BlockingSendable) SendListener() SendListener {
+	return self
+}
+
+func (self *BlockingSendable) Priority() Priority {
 	return High
 }
 
-func (self *BlockingContext) NotifyBeforeWrite() {
-	fmt.Println("BlockingContext is blocking")
+func (self *BlockingSendable) NotifyBeforeWrite() {
+	fmt.Println("BlockingSendable is blocking")
 	self.isBlocking <- struct{}{}
 	self.notify <- struct{}{}
 }
 
-func (self *BlockingContext) waitForBlocked(timeout time.Duration) error {
+func (self *BlockingSendable) waitForBlocked(timeout time.Duration) error {
 	select {
 	case <-self.isBlocking:
 		return nil
@@ -355,33 +405,38 @@ func (self *BlockingContext) waitForBlocked(timeout time.Duration) error {
 	}
 }
 
-func (self *BlockingContext) Unblock(timeout time.Duration) bool {
+func (self *BlockingSendable) Unblock(timeout time.Duration) bool {
 	select {
 	case <-self.notify:
-		fmt.Println("BlockingContext is unblocked")
+		fmt.Println("BlockingSendable is unblocked")
 		return true
 	case <-time.After(timeout):
 		return false
 	}
 }
 
-func NewNotifyContext(wrapped SendContext) *NotifyContext {
-	return &NotifyContext{
-		SendContext: wrapped,
-		notify:      make(chan SendContext, 10),
+func NewNotifySendable(wrapped Sendable) *NotifySendable {
+	return &NotifySendable{
+		Sendable: wrapped,
+		notify:   make(chan Sendable, 10),
 	}
 }
 
-type NotifyContext struct {
-	SendContext
-	notify chan SendContext
+type NotifySendable struct {
+	Sendable
+	BaseSendListener
+	notify chan Sendable
 }
 
-func (self *NotifyContext) NotifyBeforeWrite() {
+func (self *NotifySendable) SendListener() SendListener {
+	return self
+}
+
+func (self *NotifySendable) NotifyBeforeWrite() {
 	self.notify <- self
 }
 
-func (self *NotifyContext) AssertNext(t *testing.T, timeout time.Duration) {
+func (self *NotifySendable) AssertNext(t *testing.T, timeout time.Duration) {
 	select {
 	case next := <-self.notify:
 		require.Equal(t, self, next)

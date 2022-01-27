@@ -55,7 +55,7 @@ func (d TraceMessageDecode) MarshalResult() ([]byte, bool) {
 	return data, true
 }
 
-func DecodeTraceAndFormat(decode []byte) string {
+func decodeTraceAndFormat(decode []byte) string {
 	if len(decode) > 0 {
 		meta := make(map[string]interface{})
 		err := json.Unmarshal(decode, &meta)

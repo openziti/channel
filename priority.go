@@ -25,7 +25,7 @@ const (
 	Low      = 10240
 )
 
-type priorityHeap []SendContext
+type priorityHeap []Sendable
 
 func (pq priorityHeap) Len() int {
 	return len(pq)
@@ -36,7 +36,7 @@ func (pq priorityHeap) Len() int {
 //
 func (pq priorityHeap) Less(i, j int) bool {
 	if pq[i].Priority() == pq[j].Priority() {
-		return pq[i].Msg().Sequence() < pq[j].Msg().Sequence()
+		return pq[i].Sequence() < pq[j].Sequence()
 	} else {
 		return pq[i].Priority() < pq[j].Priority()
 	}
@@ -47,7 +47,7 @@ func (pq priorityHeap) Swap(i, j int) {
 }
 
 func (pq *priorityHeap) Push(x interface{}) {
-	pm := x.(SendContext)
+	pm := x.(Sendable)
 	*pq = append(*pq, pm)
 }
 

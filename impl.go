@@ -34,31 +34,37 @@ import (
 )
 
 const (
-	FlagClosed    = 0
-	FlagRxStarted = 1
+	flagClosed    = 0
+	flagRxStarted = 1
 )
+
+var connectionSeq = sequence.NewSequence()
+
+func NextConnectionId() (string, error) {
+	return connectionSeq.NextHash()
+}
 
 type channelImpl struct {
 	logicalName       string
 	underlay          Underlay
 	options           *Options
 	sequence          *sequence.Sequence
-	outQueue          chan SendContext
+	outQueue          chan Sendable
 	outPriority       *priorityHeap
 	waiters           waiterMap
 	flags             concurrenz.AtomicBitSet
 	closeNotify       chan struct{}
 	peekHandlers      []PeekHandler
 	transformHandlers []TransformHandler
-	receiveHandlers   *receiveHandlerCopyOnWriteMap
+	receiveHandlers   map[int32]ReceiveHandler
 	errorHandlers     []ErrorHandler
 	closeHandlers     []CloseHandler
 	userData          interface{}
 	lastRead          int64
 }
 
-func NewChannel(logicalName string, underlayFactory UnderlayFactory, options *Options) (Channel, error) {
-	return NewChannelWithTransportConfiguration(logicalName, underlayFactory, options, nil)
+func NewChannel(logicalName string, underlayFactory UnderlayFactory, config *Options) (Channel, error) {
+	return NewChannelWithTransportConfiguration(logicalName, underlayFactory, config, nil)
 }
 
 func NewChannelWithTransportConfiguration(logicalName string, underlayFactory UnderlayFactory, options *Options, tcfg transport.Configuration) (Channel, error) {
@@ -66,34 +72,29 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 		logicalName:     logicalName,
 		options:         options,
 		sequence:        sequence.NewSequence(),
-		outQueue:        make(chan SendContext, 4),
+		outQueue:        make(chan Sendable, 4),
 		outPriority:     &priorityHeap{},
-		receiveHandlers: NewReceiveHandlerCopyOnWriteMap(),
+		receiveHandlers: map[int32]ReceiveHandler{},
 		closeNotify:     make(chan struct{}),
 	}
 
 	heap.Init(impl.outPriority)
-	impl.AddReceiveHandler(&pingHandler{})
+	impl.AddTypedReceiveHandler(&pingHandler{})
 
 	timeout := time.Duration(0)
 	if options != nil {
 		timeout = time.Duration(options.ConnectTimeoutMs) * time.Millisecond
 	}
+
 	underlay, err := underlayFactory.Create(timeout, tcfg)
 	if err != nil {
 		return nil, err
 	}
 	impl.underlay = underlay
 
-	if options != nil {
-		for _, binder := range options.BindHandlers {
-			if err := binder.BindChannel(impl); err != nil {
-				return nil, err
-			}
-		}
-		for _, handler := range options.PeekHandlers {
-			impl.AddPeekHandler(handler)
-		}
+	//goland:noinspection GoNilness
+	if err := options.Bind(impl); err != nil {
+		return nil, err
 	}
 
 	impl.startMultiplex()
@@ -102,7 +103,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 }
 
 func AcceptNextChannel(logicalName string, underlayFactory UnderlayFactory, options *Options, tcfg transport.Configuration) error {
-	underlay, err := underlayFactory.Create(0, tcfg)
+	underlay, err := underlayFactory.Create(options.ConnectTimeout(), tcfg)
 	if err != nil {
 		return err
 	}
@@ -116,24 +117,18 @@ func acceptAsync(logicalName string, underlay Underlay, options *Options) {
 		logicalName:     logicalName,
 		options:         options,
 		sequence:        sequence.NewSequence(),
-		outQueue:        make(chan SendContext, 4),
+		outQueue:        make(chan Sendable, 4),
 		outPriority:     &priorityHeap{},
-		receiveHandlers: NewReceiveHandlerCopyOnWriteMap(),
+		receiveHandlers: map[int32]ReceiveHandler{},
 	}
 
 	heap.Init(impl.outPriority)
-	impl.AddReceiveHandler(&pingHandler{})
+	impl.AddTypedReceiveHandler(&pingHandler{})
 
-	if options != nil {
-		for _, binder := range options.BindHandlers {
-			if err := binder.BindChannel(impl); err != nil {
-				pfxlog.Logger().WithError(err).Errorf("failure accepting channel %v with underlay %v", impl.Label(), underlay.Label())
-				return
-			}
-		}
-		for _, handler := range options.PeekHandlers {
-			impl.AddPeekHandler(handler)
-		}
+	//goland:noinspection GoNilness
+	if err := options.Bind(impl); err != nil {
+		pfxlog.Logger().WithError(err).Errorf("failure accepting channel %v with underlay %v", impl.Label(), underlay.Label())
+		return
 	}
 
 	impl.startMultiplex()
@@ -167,6 +162,10 @@ func (channel *channelImpl) Label() string {
 	}
 }
 
+func (channel *channelImpl) GetChannel() Channel {
+	return channel
+}
+
 func (channel *channelImpl) Bind(h BindHandler) error {
 	return h.BindChannel(channel)
 }
@@ -179,8 +178,16 @@ func (channel *channelImpl) AddTransformHandler(h TransformHandler) {
 	channel.transformHandlers = append(channel.transformHandlers, h)
 }
 
-func (channel *channelImpl) AddReceiveHandler(h ReceiveHandler) {
-	channel.receiveHandlers.put(h)
+func (channel *channelImpl) AddTypedReceiveHandler(h TypedReceiveHandler) {
+	channel.receiveHandlers[h.ContentType()] = h
+}
+
+func (channel *channelImpl) AddReceiveHandler(contentType int32, h ReceiveHandler) {
+	channel.receiveHandlers[contentType] = h
+}
+
+func (channel *channelImpl) AddReceiveHandlerF(contentType int32, h ReceiveHandlerF) {
+	channel.AddReceiveHandler(contentType, h)
 }
 
 func (channel *channelImpl) AddErrorHandler(h ErrorHandler) {
@@ -200,7 +207,7 @@ func (channel *channelImpl) GetUserData() interface{} {
 }
 
 func (channel *channelImpl) Close() error {
-	if channel.flags.CompareAndSet(FlagClosed, false, true) {
+	if channel.flags.CompareAndSet(flagClosed, false, true) {
 		pfxlog.ContextLogger(channel.Label()).Debug("closing channel")
 
 		close(channel.closeNotify)
@@ -224,21 +231,25 @@ func (channel *channelImpl) Close() error {
 }
 
 func (channel *channelImpl) IsClosed() bool {
-	return channel.flags.IsSet(FlagClosed)
+	return channel.flags.IsSet(flagClosed)
 }
 
-func (channel *channelImpl) Send(sendCtx SendContext) error {
-	if err := sendCtx.Context().Err(); err != nil {
+func (channel *channelImpl) Send(s Sendable) error {
+	if err := s.Context().Err(); err != nil {
 		return err
 	}
-	channel.stampSequence(sendCtx.Msg())
+
+	s.SetSequence(int32(channel.sequence.Next()))
 
 	select {
-	case <-sendCtx.Context().Done():
-		return errors.Errorf("msg send queuing failed")
+	case <-s.Context().Done():
+		if err := s.Context().Err(); err != nil {
+			return TimeoutError{errors.Wrap(err, "timeout waiting for message reply")}
+		}
+		return errors.New("timeout waiting to put message in send queue")
 	case <-channel.closeNotify:
 		return errors.New("channel closed")
-	case channel.outQueue <- sendCtx:
+	case channel.outQueue <- s:
 	}
 	return nil
 }
@@ -263,7 +274,7 @@ func (channel *channelImpl) StartRx() {
 }
 
 func (channel *channelImpl) rxer() {
-	if !channel.flags.CompareAndSet(FlagRxStarted, false, true) {
+	if !channel.flags.CompareAndSet(flagRxStarted, false, true) {
 		return
 	}
 
@@ -311,14 +322,9 @@ func (channel *channelImpl) rxer() {
 				channel.waiters.reapExpired(now)
 			}
 			replyFor := m.ReplyFor()
-			if replyCh := channel.waiters.RemoveWaiter(replyFor); replyCh != nil {
+			if replyReceiver := channel.waiters.RemoveWaiter(replyFor); replyReceiver != nil {
 				log.Tracef("waiter found for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
-
-				select {
-				case replyCh <- m:
-				default:
-					log.Warnf("unable to notify waiter of response. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
-				}
+				replyReceiver.AcceptReply(m)
 				handled = true
 			} else {
 				log.Debugf("no waiter for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
@@ -326,12 +332,10 @@ func (channel *channelImpl) rxer() {
 		}
 
 		if !handled {
-			receiveHandlers := channel.receiveHandlers.getMap()
-
-			if receiveHandler, found := receiveHandlers[m.ContentType]; found {
+			if receiveHandler, found := channel.receiveHandlers[m.ContentType]; found {
 				receiveHandler.HandleReceive(m, channel)
 
-			} else if anyHandler, found := receiveHandlers[AnyContentType]; found {
+			} else if anyHandler, found := channel.receiveHandlers[AnyContentType]; found {
 				anyHandler.HandleReceive(m, channel)
 
 			} else {
@@ -352,19 +356,23 @@ func (channel *channelImpl) txer() {
 		done := false
 		selecting := true
 
+		count := 0
+
 		pm, ok := <-channel.outQueue
 		if ok {
 			heap.Push(channel.outPriority, pm)
+			count++
 		} else {
 			done = true
 			selecting = false
 		}
 
-		for selecting {
+		for selecting && count < 64 {
 			select {
 			case pm, ok := <-channel.outQueue:
 				if ok {
 					heap.Push(channel.outPriority, pm)
+					count++
 				} else {
 					done = true
 					selecting = false
@@ -375,28 +383,32 @@ func (channel *channelImpl) txer() {
 		}
 
 		for channel.outPriority.Len() > 0 {
-			sendCtx := heap.Pop(channel.outPriority).(SendContext)
+			sendable := heap.Pop(channel.outPriority).(Sendable)
+			sendListener := sendable.SendListener()
+			m := sendable.Msg()
 
-			if err := sendCtx.Context().Err(); err != nil {
-				sendCtx.NotifyErr(err)
+			if err := sendable.Context().Err(); err != nil {
+				sendListener.NotifyErr(TimeoutError{err})
 				continue
 			}
 
-			sendCtx.NotifyBeforeWrite()
+			sendListener.NotifyBeforeWrite()
 
-			m := sendCtx.Msg()
+			if m == nil { // allow nil message in Sendable so we can send tracers to check time from send to write
+				continue
+			}
 
 			for _, transformHandler := range channel.transformHandlers {
 				transformHandler.Tx(m, channel)
 			}
 
-			channel.waiters.AddWaiter(sendCtx)
+			channel.waiters.AddWaiter(sendable)
 
 			var err error
 			if timeout := channel.options.WriteTimeout; timeout > 0 {
 				if err = channel.underlay.SetWriteTimeout(timeout); err != nil {
 					log.WithError(err).Errorf("unable to set write timeout")
-					sendCtx.NotifyErr(err)
+					sendListener.NotifyErr(err)
 					done = true
 				}
 			}
@@ -405,7 +417,7 @@ func (channel *channelImpl) txer() {
 				err = channel.underlay.Tx(m)
 				if err != nil {
 					log.WithError(err).Errorf("write error")
-					sendCtx.NotifyErr(err)
+					sendListener.NotifyErr(err)
 					done = true
 				} else {
 					for _, peekHandler := range channel.peekHandlers {
@@ -420,7 +432,7 @@ func (channel *channelImpl) txer() {
 				}
 			}
 
-			sendCtx.NotifyAfterWrite()
+			sendListener.NotifyAfterWrite()
 		}
 
 		if done {
@@ -429,46 +441,13 @@ func (channel *channelImpl) txer() {
 	}
 }
 
-func (channel *channelImpl) stampSequence(m *Message) {
-	m.sequence = int32(channel.sequence.Next())
-}
-
 func (ch *channelImpl) GetTimeSinceLastRead() time.Duration {
 	return time.Duration(info.NowInMilliseconds()-atomic.LoadInt64(&ch.lastRead)) * time.Millisecond
 }
 
-func NewReceiveHandlerCopyOnWriteMap() *receiveHandlerCopyOnWriteMap {
-	result := &receiveHandlerCopyOnWriteMap{}
-	result.value.Store(map[int32]ReceiveHandler{})
-	return result
-}
-
-type receiveHandlerCopyOnWriteMap struct {
-	value atomic.Value
-	lock  sync.Mutex
-}
-
-func (m *receiveHandlerCopyOnWriteMap) put(value ReceiveHandler) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	var current = m.value.Load().(map[int32]ReceiveHandler)
-	mapCopy := map[int32]ReceiveHandler{}
-	for k, v := range current {
-		mapCopy[k] = v
-	}
-	mapCopy[value.ContentType()] = value
-	m.value.Store(mapCopy)
-}
-
-func (m *receiveHandlerCopyOnWriteMap) getMap() map[int32]ReceiveHandler {
-	var current = m.value.Load().(map[int32]ReceiveHandler)
-	return current
-}
-
 type waiter struct {
-	replyCh chan<- *Message
-	ttlMs   int64
+	replyReceiver ReplyReceiver
+	ttlMs         int64
 }
 
 type waiterMap struct {
@@ -480,28 +459,28 @@ func (self *waiterMap) Size() int32 {
 	return atomic.LoadInt32(&self.size)
 }
 
-func (self *waiterMap) AddWaiter(sendCtx SendContext) {
-	if replyCh := sendCtx.ReplyChan(); replyCh != nil {
+func (self *waiterMap) AddWaiter(sendable Sendable) {
+	if replyReceiver := sendable.ReplyReceiver(); replyReceiver != nil {
 		w := &waiter{
-			replyCh: replyCh,
+			replyReceiver: replyReceiver,
 		}
 
-		if deadline, hasDeadline := sendCtx.Context().Deadline(); hasDeadline {
+		if deadline, hasDeadline := sendable.Context().Deadline(); hasDeadline {
 			w.ttlMs = deadline.UnixMilli()
 		} else {
 			w.ttlMs = info.NowInMilliseconds() + 30_000
 		}
 
-		self.m.Store(sendCtx.Msg().Sequence(), w)
+		self.m.Store(sendable.Msg().Sequence(), w)
 		atomic.AddInt32(&self.size, 1)
 	}
 }
 
-func (self *waiterMap) RemoveWaiter(seq int32) chan<- *Message {
+func (self *waiterMap) RemoveWaiter(seq int32) ReplyReceiver {
 	if result, found := self.m.LoadAndDelete(seq); found {
 		w := result.(*waiter)
 		atomic.AddInt32(&self.size, -1)
-		return w.replyCh
+		return w.replyReceiver
 	}
 	return nil
 }
