@@ -251,67 +251,67 @@ func (self *replyEnvelope) WaitForReply(ch Channel) (*Message, error) {
 }
 
 func NewErrorEnvelope(err error) Envelope {
-	return &ErrorEnvelope{
+	return &errorEnvelope{
 		ctx: NewErrorContext(err),
 	}
 }
 
-type ErrorEnvelope struct {
+type errorEnvelope struct {
 	ctx context.Context
 }
 
-func (self *ErrorEnvelope) SetSequence(seq int32) {}
+func (self *errorEnvelope) SetSequence(seq int32) {}
 
-func (self *ErrorEnvelope) Sequence() int32 {
+func (self *errorEnvelope) Sequence() int32 {
 	return 0
 }
 
-func (self *ErrorEnvelope) Msg() *Message {
+func (self *errorEnvelope) Msg() *Message {
 	return nil
 }
 
-func (self *ErrorEnvelope) Priority() Priority {
+func (self *errorEnvelope) Priority() Priority {
 	return Standard
 }
 
-func (self *ErrorEnvelope) Context() context.Context {
+func (self *errorEnvelope) Context() context.Context {
 	return self.ctx
 }
 
-func (self *ErrorEnvelope) SendListener() SendListener {
+func (self *errorEnvelope) SendListener() SendListener {
 	return BaseSendListener{}
 }
 
-func (self *ErrorEnvelope) ReplyReceiver() ReplyReceiver {
+func (self *errorEnvelope) ReplyReceiver() ReplyReceiver {
 	return nil
 }
 
-func (self *ErrorEnvelope) ToSendable() Sendable {
+func (self *errorEnvelope) ToSendable() Sendable {
 	return self
 }
 
-func (self *ErrorEnvelope) SendAndWaitForWire(Channel) error {
+func (self *errorEnvelope) SendAndWaitForWire(Channel) error {
 	return self.ctx.Err()
 }
 
-func (self *ErrorEnvelope) SendForReply(Channel) (*Message, error) {
+func (self *errorEnvelope) SendForReply(Channel) (*Message, error) {
 	return nil, self.ctx.Err()
 }
 
-func (self *ErrorEnvelope) WithTimeout(time.Duration) TimeoutEnvelope {
+func (self *errorEnvelope) WithTimeout(time.Duration) TimeoutEnvelope {
 	return self
 }
 
-func (self *ErrorEnvelope) Send(Channel) error {
+func (self *errorEnvelope) Send(Channel) error {
 	return self.ctx.Err()
 }
 
-func (self *ErrorEnvelope) WithPriority(Priority) Envelope {
+func (self *errorEnvelope) WithPriority(Priority) Envelope {
 	return self
 }
 
 func NewErrorContext(err error) context.Context {
-	result := &ErrorContext{
+	result := &errorContext{
 		err:     err,
 		closedC: make(chan struct{}),
 	}
@@ -319,25 +319,25 @@ func NewErrorContext(err error) context.Context {
 	return result
 }
 
-type ErrorContext struct {
+type errorContext struct {
 	err     error
 	closedC chan struct{}
 }
 
-func (self *ErrorContext) Deadline() (deadline time.Time, ok bool) {
+func (self *errorContext) Deadline() (deadline time.Time, ok bool) {
 	return time.Time{}, false
 }
 
-func (self *ErrorContext) Done() <-chan struct{} {
+func (self *errorContext) Done() <-chan struct{} {
 	return self.closedC
 }
 
-func (self *ErrorContext) Err() error {
+func (self *errorContext) Err() error {
 	return self.err
 }
 
-func (self *ErrorContext) Value(interface{}) interface{} {
+func (self *errorContext) Value(interface{}) interface{} {
 	// ignore for now. may need an implementation at some point
-	pfxlog.Logger().Error("ErrorContext.Value called, but not implemented!!!")
+	pfxlog.Logger().Error("errorContext.Value called, but not implemented!!!")
 	return nil
 }

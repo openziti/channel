@@ -119,14 +119,14 @@ type Handler interface {
 	ChannelClosed()
 }
 
-func AddLatencyProbe(ch channel.Channel, interval time.Duration, roundTripFreq uint8, handler Handler) {
+func AddLatencyProbe(ch channel.Channel, binding channel.Binding, interval time.Duration, roundTripFreq uint8, handler Handler) {
 	probe := &latencyProbe{
 		handler:       handler,
 		ch:            ch,
 		interval:      interval,
 		roundTripFreq: roundTripFreq,
 	}
-	ch.AddReceiveHandler(probe)
+	binding.AddReceiveHandler(probe)
 	go probe.run()
 }
 
@@ -233,12 +233,12 @@ func (self *RoundTripLatency) NotifyBeforeWrite() {
 	self.msg.PutUint64Header(probeTime, uint64(time.Now().UnixNano()))
 }
 
-func AddLatencyProbeResponder(ch channel.Channel) {
+func AddLatencyProbeResponder(binding channel.Binding) {
 	responder := &Responder{
-		ch:              ch,
+		ch:              binding.GetChannel(),
 		responseChannel: make(chan *channel.Message, 1),
 	}
-	ch.AddReceiveHandler(responder)
+	binding.AddReceiveHandler(responder)
 	go responder.responseSender()
 }
 

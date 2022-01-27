@@ -14,13 +14,14 @@
 	limitations under the License.
 */
 
-package channel
+package memory
 
 import (
 	"crypto/x509"
 	"errors"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/identity"
 	"io"
 	"sync"
@@ -28,8 +29,8 @@ import (
 )
 
 type memoryImpl struct {
-	tx           chan *Message
-	rx           chan *Message
+	tx           chan *channel.Message
+	rx           chan *channel.Message
 	id           *identity.TokenId
 	connectionId string
 	headers      map[int32][]byte
@@ -41,7 +42,7 @@ func (impl *memoryImpl) SetWriteTimeout(time.Duration) error {
 	panic("SetWriteTimeout not implemented")
 }
 
-func (impl *memoryImpl) Rx() (*Message, error) {
+func (impl *memoryImpl) Rx() (*channel.Message, error) {
 	if impl.closed {
 		return nil, errors.New("underlay closed")
 	}
@@ -54,7 +55,7 @@ func (impl *memoryImpl) Rx() (*Message, error) {
 	return m, nil
 }
 
-func (impl *memoryImpl) Tx(m *Message) error {
+func (impl *memoryImpl) Tx(m *channel.Message) error {
 	if impl.closed {
 		return errors.New("underlay closed")
 	}
@@ -108,7 +109,7 @@ func (impl *memoryImpl) IsClosed() bool {
 	return impl.closed
 }
 
-func newMemoryImpl(tx, rx chan *Message) *memoryImpl {
+func newMemoryImpl(tx, rx chan *channel.Message) *memoryImpl {
 	return &memoryImpl{
 		tx: tx,
 		rx: rx,
@@ -129,5 +130,5 @@ func NewMemoryContext() *MemoryContext {
 
 type memoryRequest struct {
 	dialer *memoryDialer
-	hello  *Hello
+	hello  *channel.Hello
 }

@@ -14,11 +14,12 @@
 	limitations under the License.
 */
 
-package channel
+package memory
 
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/foundation/transport"
 	"time"
@@ -30,7 +31,7 @@ type memoryDialer struct {
 	ctx      *MemoryContext
 }
 
-func NewMemoryDialer(identity *identity.TokenId, headers map[int32][]byte, ctx *MemoryContext) UnderlayFactory {
+func NewMemoryDialer(identity *identity.TokenId, headers map[int32][]byte, ctx *MemoryContext) channel.UnderlayFactory {
 	return &memoryDialer{
 		identity: identity,
 		headers:  headers,
@@ -38,14 +39,14 @@ func NewMemoryDialer(identity *identity.TokenId, headers map[int32][]byte, ctx *
 	}
 }
 
-func (dialer *memoryDialer) Create(_ time.Duration, _ transport.Configuration) (Underlay, error) {
+func (dialer *memoryDialer) Create(_ time.Duration, _ transport.Configuration) (channel.Underlay, error) {
 	log := pfxlog.ContextLogger(fmt.Sprintf("%p", dialer.ctx))
 	log.Info("started")
 	defer log.Info("exited")
 
 	dialer.ctx.request <- &memoryRequest{
 		dialer,
-		&Hello{
+		&channel.Hello{
 			IdToken: dialer.identity.Token,
 			Headers: dialer.headers,
 		},

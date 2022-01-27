@@ -108,7 +108,7 @@ func (listener *classicListener) listener(incoming chan transport.Connection) {
 		select {
 		case peer := <-incoming:
 			impl := newClassicImpl(peer, 2)
-			if connectionId, err := globalRegistry.newConnectionId(); err == nil {
+			if connectionId, err := NextConnectionId(); err == nil {
 				impl.connectionId = connectionId
 
 				if err := peer.SetReadTimeout(listener.connectOptions.ConnectTimeout()); err != nil {

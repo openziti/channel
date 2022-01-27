@@ -31,7 +31,6 @@ import (
 type Channel interface {
 	Identity
 	SetLogicalName(logicalName string)
-	Binding
 	Sender
 	io.Closer
 	IsClosed() bool

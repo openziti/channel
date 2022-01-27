@@ -34,9 +34,15 @@ import (
 )
 
 const (
-	FlagClosed    = 0
-	FlagRxStarted = 1
+	flagClosed    = 0
+	flagRxStarted = 1
 )
+
+var connectionSeq = sequence.NewSequence()
+
+func NextConnectionId() (string, error) {
+	return connectionSeq.NextHash()
+}
 
 type channelImpl struct {
 	logicalName       string
@@ -50,15 +56,15 @@ type channelImpl struct {
 	closeNotify       chan struct{}
 	peekHandlers      []PeekHandler
 	transformHandlers []TransformHandler
-	receiveHandlers   *receiveHandlerCopyOnWriteMap
+	receiveHandlers   map[int32]ReceiveHandler
 	errorHandlers     []ErrorHandler
 	closeHandlers     []CloseHandler
 	userData          interface{}
 	lastRead          int64
 }
 
-func NewChannel(logicalName string, underlayFactory UnderlayFactory, options *Options) (Channel, error) {
-	return NewChannelWithTransportConfiguration(logicalName, underlayFactory, options, nil)
+func NewChannel(logicalName string, underlayFactory UnderlayFactory, config *Options) (Channel, error) {
+	return NewChannelWithTransportConfiguration(logicalName, underlayFactory, config, nil)
 }
 
 func NewChannelWithTransportConfiguration(logicalName string, underlayFactory UnderlayFactory, options *Options, tcfg transport.Configuration) (Channel, error) {
@@ -68,7 +74,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 		sequence:        sequence.NewSequence(),
 		outQueue:        make(chan Sendable, 4),
 		outPriority:     &priorityHeap{},
-		receiveHandlers: NewReceiveHandlerCopyOnWriteMap(),
+		receiveHandlers: map[int32]ReceiveHandler{},
 		closeNotify:     make(chan struct{}),
 	}
 
@@ -79,21 +85,16 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 	if options != nil {
 		timeout = time.Duration(options.ConnectTimeoutMs) * time.Millisecond
 	}
+
 	underlay, err := underlayFactory.Create(timeout, tcfg)
 	if err != nil {
 		return nil, err
 	}
 	impl.underlay = underlay
 
-	if options != nil {
-		for _, binder := range options.BindHandlers {
-			if err := binder.BindChannel(impl); err != nil {
-				return nil, err
-			}
-		}
-		for _, handler := range options.PeekHandlers {
-			impl.AddPeekHandler(handler)
-		}
+	//goland:noinspection GoNilness
+	if err := options.Bind(impl); err != nil {
+		return nil, err
 	}
 
 	impl.startMultiplex()
@@ -102,7 +103,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 }
 
 func AcceptNextChannel(logicalName string, underlayFactory UnderlayFactory, options *Options, tcfg transport.Configuration) error {
-	underlay, err := underlayFactory.Create(0, tcfg)
+	underlay, err := underlayFactory.Create(options.ConnectTimeout(), tcfg)
 	if err != nil {
 		return err
 	}
@@ -118,22 +119,16 @@ func acceptAsync(logicalName string, underlay Underlay, options *Options) {
 		sequence:        sequence.NewSequence(),
 		outQueue:        make(chan Sendable, 4),
 		outPriority:     &priorityHeap{},
-		receiveHandlers: NewReceiveHandlerCopyOnWriteMap(),
+		receiveHandlers: map[int32]ReceiveHandler{},
 	}
 
 	heap.Init(impl.outPriority)
 	impl.AddReceiveHandler(&pingHandler{})
 
-	if options != nil {
-		for _, binder := range options.BindHandlers {
-			if err := binder.BindChannel(impl); err != nil {
-				pfxlog.Logger().WithError(err).Errorf("failure accepting channel %v with underlay %v", impl.Label(), underlay.Label())
-				return
-			}
-		}
-		for _, handler := range options.PeekHandlers {
-			impl.AddPeekHandler(handler)
-		}
+	//goland:noinspection GoNilness
+	if err := options.Bind(impl); err != nil {
+		pfxlog.Logger().WithError(err).Errorf("failure accepting channel %v with underlay %v", impl.Label(), underlay.Label())
+		return
 	}
 
 	impl.startMultiplex()
@@ -167,6 +162,10 @@ func (channel *channelImpl) Label() string {
 	}
 }
 
+func (channel *channelImpl) GetChannel() Channel {
+	return channel
+}
+
 func (channel *channelImpl) Bind(h BindHandler) error {
 	return h.BindChannel(channel)
 }
@@ -179,8 +178,12 @@ func (channel *channelImpl) AddTransformHandler(h TransformHandler) {
 	channel.transformHandlers = append(channel.transformHandlers, h)
 }
 
-func (channel *channelImpl) AddReceiveHandler(h ReceiveHandler) {
-	channel.receiveHandlers.put(h)
+func (channel *channelImpl) AddReceiveHandler(h TypedReceiveHandler) {
+	channel.receiveHandlers[h.ContentType()] = h
+}
+
+func (channel *channelImpl) AddReceiveHandlerF(contentType int32, h ReceiveHandlerF) {
+	channel.receiveHandlers[contentType] = h
 }
 
 func (channel *channelImpl) AddErrorHandler(h ErrorHandler) {
@@ -200,7 +203,7 @@ func (channel *channelImpl) GetUserData() interface{} {
 }
 
 func (channel *channelImpl) Close() error {
-	if channel.flags.CompareAndSet(FlagClosed, false, true) {
+	if channel.flags.CompareAndSet(flagClosed, false, true) {
 		pfxlog.ContextLogger(channel.Label()).Debug("closing channel")
 
 		close(channel.closeNotify)
@@ -224,7 +227,7 @@ func (channel *channelImpl) Close() error {
 }
 
 func (channel *channelImpl) IsClosed() bool {
-	return channel.flags.IsSet(FlagClosed)
+	return channel.flags.IsSet(flagClosed)
 }
 
 func (channel *channelImpl) Send(s Sendable) error {
@@ -264,7 +267,7 @@ func (channel *channelImpl) StartRx() {
 }
 
 func (channel *channelImpl) rxer() {
-	if !channel.flags.CompareAndSet(FlagRxStarted, false, true) {
+	if !channel.flags.CompareAndSet(flagRxStarted, false, true) {
 		return
 	}
 
@@ -322,12 +325,10 @@ func (channel *channelImpl) rxer() {
 		}
 
 		if !handled {
-			receiveHandlers := channel.receiveHandlers.getMap()
-
-			if receiveHandler, found := receiveHandlers[m.ContentType]; found {
+			if receiveHandler, found := channel.receiveHandlers[m.ContentType]; found {
 				receiveHandler.HandleReceive(m, channel)
 
-			} else if anyHandler, found := receiveHandlers[AnyContentType]; found {
+			} else if anyHandler, found := channel.receiveHandlers[AnyContentType]; found {
 				anyHandler.HandleReceive(m, channel)
 
 			} else {
@@ -435,35 +436,6 @@ func (channel *channelImpl) txer() {
 
 func (ch *channelImpl) GetTimeSinceLastRead() time.Duration {
 	return time.Duration(info.NowInMilliseconds()-atomic.LoadInt64(&ch.lastRead)) * time.Millisecond
-}
-
-func NewReceiveHandlerCopyOnWriteMap() *receiveHandlerCopyOnWriteMap {
-	result := &receiveHandlerCopyOnWriteMap{}
-	result.value.Store(map[int32]ReceiveHandler{})
-	return result
-}
-
-type receiveHandlerCopyOnWriteMap struct {
-	value atomic.Value
-	lock  sync.Mutex
-}
-
-func (m *receiveHandlerCopyOnWriteMap) put(value ReceiveHandler) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	var current = m.value.Load().(map[int32]ReceiveHandler)
-	mapCopy := map[int32]ReceiveHandler{}
-	for k, v := range current {
-		mapCopy[k] = v
-	}
-	mapCopy[value.ContentType()] = value
-	m.value.Store(mapCopy)
-}
-
-func (m *receiveHandlerCopyOnWriteMap) getMap() map[int32]ReceiveHandler {
-	var current = m.value.Load().(map[int32]ReceiveHandler)
-	return current
 }
 
 type waiter struct {

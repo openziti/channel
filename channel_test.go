@@ -90,7 +90,7 @@ func TestInQueueTimeout(t *testing.T) {
 	req.NoError(ch.Send(blockingSendContext))
 	req.NoError(blockingSendContext.waitForBlocked(50 * time.Millisecond))
 
-	msg2 := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0))).WithPriority(High).(*envelopeImpl)
+	msg2 := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0))).WithPriority(High).(*priorityEnvelopeImpl)
 	blockingSendContext2 := NewBlockingContext(msg2)
 	req.NoError(ch.Send(blockingSendContext2))
 
@@ -248,16 +248,16 @@ func TestPriorityOrdering(t *testing.T) {
 	req.NoError(ch.Send(blockingSendContext))
 	req.NoError(blockingSendContext.waitForBlocked(50 * time.Millisecond))
 
-	lowCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Low).(*envelopeImpl))
+	lowCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Low).(*priorityEnvelopeImpl))
 	req.NoError(ch.Send(lowCtx))
 
-	stdCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Standard).(*envelopeImpl))
+	stdCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Standard).(*priorityEnvelopeImpl))
 	req.NoError(ch.Send(stdCtx))
 
-	highCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(High).(*envelopeImpl))
+	highCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(High).(*priorityEnvelopeImpl))
 	req.NoError(ch.Send(highCtx))
 
-	highestCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Highest).(*envelopeImpl))
+	highestCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Highest).(*priorityEnvelopeImpl))
 	req.NoError(ch.Send(highestCtx))
 
 	blockingSendContext.Unblock(10 * time.Millisecond)
@@ -329,14 +329,20 @@ func (self *echoServer) stop(t *testing.T) {
 
 func (self *echoServer) accept() {
 	counter := 0
+
+	self.options.SetBindHandlerF(func(binding Binding) error {
+		binding.AddReceiveHandlerF(ContentTypePingType, self.pingHandler)
+		return nil
+	})
+
 	for {
 		counter++
-		ch, err := NewChannel(fmt.Sprintf("echo-server-%v", counter), self.listener, self.options)
+
+		_, err := NewChannel(fmt.Sprintf("echo-server-%v", counter), self.listener, self.options)
 		if err != nil {
 			logrus.WithError(err).Error("echo listener error, exiting")
 			return
 		}
-		ch.AddReceiveHandler(&FunctionReceiveAdapter{Type: ContentTypePingType, Handler: self.pingHandler})
 	}
 }
 
@@ -384,7 +390,7 @@ func (self *BlockingSendable) Priority() Priority {
 	return High
 }
 
-func (self *BlockingSendable) NotifyBeforeWrite(*Message) {
+func (self *BlockingSendable) NotifyBeforeWrite() {
 	fmt.Println("BlockingSendable is blocking")
 	self.isBlocking <- struct{}{}
 	self.notify <- struct{}{}
@@ -426,7 +432,7 @@ func (self *NotifySendable) SendListener() SendListener {
 	return self
 }
 
-func (self *NotifySendable) NotifyBeforeWrite(*Message) {
+func (self *NotifySendable) NotifyBeforeWrite() {
 	self.notify <- self
 }
 
