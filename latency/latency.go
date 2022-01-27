@@ -126,7 +126,7 @@ func AddLatencyProbe(ch channel.Channel, binding channel.Binding, interval time.
 		interval:      interval,
 		roundTripFreq: roundTripFreq,
 	}
-	binding.AddReceiveHandler(probe)
+	binding.AddTypedReceiveHandler(probe)
 	go probe.run()
 }
 
@@ -238,7 +238,7 @@ func AddLatencyProbeResponder(binding channel.Binding) {
 		ch:              binding.GetChannel(),
 		responseChannel: make(chan *channel.Message, 1),
 	}
-	binding.AddReceiveHandler(responder)
+	binding.AddTypedReceiveHandler(responder)
 	go responder.responseSender()
 }
 

@@ -79,7 +79,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 	}
 
 	heap.Init(impl.outPriority)
-	impl.AddReceiveHandler(&pingHandler{})
+	impl.AddTypedReceiveHandler(&pingHandler{})
 
 	timeout := time.Duration(0)
 	if options != nil {
@@ -123,7 +123,7 @@ func acceptAsync(logicalName string, underlay Underlay, options *Options) {
 	}
 
 	heap.Init(impl.outPriority)
-	impl.AddReceiveHandler(&pingHandler{})
+	impl.AddTypedReceiveHandler(&pingHandler{})
 
 	//goland:noinspection GoNilness
 	if err := options.Bind(impl); err != nil {
@@ -178,12 +178,16 @@ func (channel *channelImpl) AddTransformHandler(h TransformHandler) {
 	channel.transformHandlers = append(channel.transformHandlers, h)
 }
 
-func (channel *channelImpl) AddReceiveHandler(h TypedReceiveHandler) {
+func (channel *channelImpl) AddTypedReceiveHandler(h TypedReceiveHandler) {
 	channel.receiveHandlers[h.ContentType()] = h
 }
 
-func (channel *channelImpl) AddReceiveHandlerF(contentType int32, h ReceiveHandlerF) {
+func (channel *channelImpl) AddReceiveHandler(contentType int32, h ReceiveHandler) {
 	channel.receiveHandlers[contentType] = h
+}
+
+func (channel *channelImpl) AddReceiveHandlerF(contentType int32, h ReceiveHandlerF) {
+	channel.AddReceiveHandler(contentType, h)
 }
 
 func (channel *channelImpl) AddErrorHandler(h ErrorHandler) {

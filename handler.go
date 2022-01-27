@@ -29,8 +29,9 @@ type Binding interface {
 	Bind(h BindHandler) error
 	AddPeekHandler(h PeekHandler)
 	AddTransformHandler(h TransformHandler)
-	AddReceiveHandler(h TypedReceiveHandler)
+	AddReceiveHandler(contentType int32, h ReceiveHandler)
 	AddReceiveHandlerF(contentType int32, h ReceiveHandlerF)
+	AddTypedReceiveHandler(h TypedReceiveHandler)
 	AddErrorHandler(h ErrorHandler)
 	AddCloseHandler(h CloseHandler)
 	SetUserData(data interface{})
