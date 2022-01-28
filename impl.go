@@ -352,6 +352,11 @@ func (channel *channelImpl) txer() {
 
 	defer func() { _ = channel.Close() }()
 
+	var writeTimeout time.Duration
+	if channel.options != nil {
+		writeTimeout = channel.options.WriteTimeout
+	}
+
 	for {
 		done := false
 		selecting := true
@@ -405,8 +410,8 @@ func (channel *channelImpl) txer() {
 			channel.waiters.AddWaiter(sendable)
 
 			var err error
-			if timeout := channel.options.WriteTimeout; timeout > 0 {
-				if err = channel.underlay.SetWriteTimeout(timeout); err != nil {
+			if writeTimeout > 0 {
+				if err = channel.underlay.SetWriteTimeout(writeTimeout); err != nil {
 					log.WithError(err).Errorf("unable to set write timeout")
 					sendListener.NotifyErr(err)
 					done = true
