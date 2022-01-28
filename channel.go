@@ -79,6 +79,9 @@ type Envelope interface {
 	// Send sends the envelope on the given Channel
 	Send(ch Channel) error
 
+	// ReplyTo allows setting the reply header in a fluent style
+	ReplyTo(msg *Message) Envelope
+
 	// ToSendable converts the Envelope into a Sendable, which can be submitted to a Channel for sending
 	ToSendable() Sendable
 }

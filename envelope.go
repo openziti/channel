@@ -25,6 +25,11 @@ func (self *priorityEnvelopeImpl) Send(ch Channel) error {
 	return ch.Send(self)
 }
 
+func (self *priorityEnvelopeImpl) ReplyTo(msg *Message) Envelope {
+	self.msg.ReplyTo(msg)
+	return self
+}
+
 func (self *priorityEnvelopeImpl) Msg() *Message {
 	return self.msg
 }
@@ -81,6 +86,11 @@ func (self *envelopeImpl) Sequence() int32 {
 
 func (self *envelopeImpl) Msg() *Message {
 	return self.msg
+}
+
+func (self *envelopeImpl) ReplyTo(msg *Message) Envelope {
+	self.msg.ReplyTo(msg)
+	return self
 }
 
 func (self *envelopeImpl) ReplyReceiver() ReplyReceiver {
@@ -268,6 +278,10 @@ func (self *errorEnvelope) Sequence() int32 {
 
 func (self *errorEnvelope) Msg() *Message {
 	return nil
+}
+
+func (self *errorEnvelope) ReplyTo(msg *Message) Envelope {
+	return self
 }
 
 func (self *errorEnvelope) Priority() Priority {

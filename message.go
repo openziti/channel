@@ -296,7 +296,7 @@ func (m *Message) Priority() Priority {
 	return Standard
 }
 
-func (m *Message) ReplyTo(o *Message) {
+func (m *Message) ReplyTo(o *Message) Envelope {
 	replyFor := o.sequence
 	m.replyFor = &replyFor
 	for key, value := range o.Headers {
@@ -304,6 +304,7 @@ func (m *Message) ReplyTo(o *Message) {
 			m.Headers[key] = value
 		}
 	}
+	return m
 }
 
 func (m *Message) String() string {
