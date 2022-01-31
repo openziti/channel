@@ -16,7 +16,7 @@ func Example() {
 	dialId := &identity.TokenId{Token: "echo-client"}
 	underlayFactory := channel.NewClassicDialer(dialId, addr, nil)
 
-	ch, err := channel.NewChannel("echo-test", underlayFactory, nil)
+	ch, err := channel.NewChannel("echo-test", underlayFactory, nil, nil)
 	if err != nil {
 		panic(err)
 	}

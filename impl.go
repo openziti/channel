@@ -63,11 +63,11 @@ type channelImpl struct {
 	lastRead          int64
 }
 
-func NewChannel(logicalName string, underlayFactory UnderlayFactory, config *Options) (Channel, error) {
-	return NewChannelWithTransportConfiguration(logicalName, underlayFactory, config, nil)
+func NewChannel(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options) (Channel, error) {
+	return NewChannelWithTransportConfiguration(logicalName, underlayFactory, bindHandler, options, nil)
 }
 
-func NewChannelWithTransportConfiguration(logicalName string, underlayFactory UnderlayFactory, options *Options, tcfg transport.Configuration) (Channel, error) {
+func NewChannelWithTransportConfiguration(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options, tcfg transport.Configuration) (Channel, error) {
 	impl := &channelImpl{
 		logicalName:     logicalName,
 		options:         options,
@@ -92,8 +92,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 	}
 	impl.underlay = underlay
 
-	//goland:noinspection GoNilness
-	if err := options.Bind(impl); err != nil {
+	if err := bind(bindHandler, impl); err != nil {
 		return nil, err
 	}
 
@@ -102,16 +101,16 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 	return impl, nil
 }
 
-func AcceptNextChannel(logicalName string, underlayFactory UnderlayFactory, options *Options, tcfg transport.Configuration) error {
+func AcceptNextChannel(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options, tcfg transport.Configuration) error {
 	underlay, err := underlayFactory.Create(options.ConnectTimeout(), tcfg)
 	if err != nil {
 		return err
 	}
-	go acceptAsync(logicalName, underlay, options)
+	go acceptAsync(logicalName, underlay, bindHandler, options)
 	return nil
 }
 
-func acceptAsync(logicalName string, underlay Underlay, options *Options) {
+func acceptAsync(logicalName string, underlay Underlay, bindHandler BindHandler, options *Options) {
 	impl := &channelImpl{
 		underlay:        underlay,
 		logicalName:     logicalName,
@@ -126,7 +125,7 @@ func acceptAsync(logicalName string, underlay Underlay, options *Options) {
 	impl.AddTypedReceiveHandler(&pingHandler{})
 
 	//goland:noinspection GoNilness
-	if err := options.Bind(impl); err != nil {
+	if err := bind(bindHandler, impl); err != nil {
 		pfxlog.Logger().WithError(err).Errorf("failure accepting channel %v with underlay %v", impl.Label(), underlay.Label())
 		return
 	}
@@ -507,4 +506,19 @@ func (self *waiterMap) clear() {
 		self.m.Delete(k)
 		return true
 	})
+}
+
+func bind(bindHandler BindHandler, binding Binding) error {
+	if bindHandler == nil {
+		return nil
+	}
+
+	if err := bindHandler.BindChannel(binding); err != nil {
+		if closeErr := binding.GetChannel().Close(); closeErr != nil {
+			pfxlog.ContextLogger(binding.GetChannel().Label()).WithError(err).Warn("error closing channel after bind failure")
+		}
+		return err
+	}
+
+	return nil
 }
