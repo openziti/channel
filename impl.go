@@ -119,6 +119,7 @@ func acceptAsync(logicalName string, underlay Underlay, bindHandler BindHandler,
 		outQueue:        make(chan Sendable, 4),
 		outPriority:     &priorityHeap{},
 		receiveHandlers: map[int32]ReceiveHandler{},
+		closeNotify:     make(chan struct{}),
 	}
 
 	heap.Init(impl.outPriority)
