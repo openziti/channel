@@ -19,7 +19,6 @@ package channel
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
 	"github.com/pkg/errors"
 	"time"
 )
@@ -39,30 +38,10 @@ const (
 )
 
 type Options struct {
-	BindHandler  BindHandler
 	OutQueueSize int
 	ConnectOptions
 	DelayRxStart bool
 	WriteTimeout time.Duration
-}
-
-func (self *Options) SetBindHandlerF(handler BindHandlerF) {
-	self.BindHandler = handler
-}
-
-func (self *Options) Bind(binding Binding) error {
-	if self == nil || self.BindHandler == nil {
-		return nil
-	}
-
-	if err := self.BindHandler.BindChannel(binding); err != nil {
-		if closeErr := binding.GetChannel().Close(); closeErr != nil {
-			pfxlog.ContextLogger(binding.GetChannel().Label()).WithError(err).Warn("error closing channel after bind failure")
-		}
-		return err
-	}
-
-	return nil
 }
 
 func DefaultOptions() *Options {

@@ -276,7 +276,7 @@ func dialServer(options *Options, t *testing.T) Channel {
 	clientId := &identity.TokenId{Token: "echo-client"}
 	underlayFactory := NewClassicDialer(clientId, addr, nil)
 
-	ch, err := NewChannel("echo-test", underlayFactory, options)
+	ch, err := NewChannel("echo-test", underlayFactory, nil, options)
 	req.NoError(err)
 
 	return ch
@@ -330,15 +330,15 @@ func (self *echoServer) stop(t *testing.T) {
 func (self *echoServer) accept() {
 	counter := 0
 
-	self.options.SetBindHandlerF(func(binding Binding) error {
+	bindHandler := func(binding Binding) error {
 		binding.AddReceiveHandlerF(ContentTypePingType, self.pingHandler)
 		return nil
-	})
+	}
 
 	for {
 		counter++
 
-		_, err := NewChannel(fmt.Sprintf("echo-server-%v", counter), self.listener, self.options)
+		_, err := NewChannel(fmt.Sprintf("echo-server-%v", counter), self.listener, BindHandlerF(bindHandler), self.options)
 		if err != nil {
 			logrus.WithError(err).Error("echo listener error, exiting")
 			return
