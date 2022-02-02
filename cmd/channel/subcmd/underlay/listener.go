@@ -19,7 +19,7 @@ package underlay
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/channel"
+	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/dotziti"
 	"github.com/openziti/foundation/transport"
 	"github.com/spf13/cobra"
@@ -73,10 +73,9 @@ func runListener(_ *cobra.Command, _ []string) {
 
 	log := pfxlog.Logger()
 	options := channel.DefaultOptions()
-	options.BindHandlers = []channel.BindHandler{&bindHandler{}}
 
 	for {
-		ch, err := channel.NewChannel("channel", listener, options)
+		ch, err := channel.NewChannel("channel", listener, &bindHandler{}, options)
 		if err != nil {
 			panic(err)
 		}

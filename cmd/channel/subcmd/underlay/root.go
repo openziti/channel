@@ -17,7 +17,7 @@
 package underlay
 
 import (
-	"github.com/openziti/foundation/channel/cmd/channel/subcmd"
+	"github.com/openziti/channel/cmd/channel/subcmd"
 	"github.com/spf13/cobra"
 )
 

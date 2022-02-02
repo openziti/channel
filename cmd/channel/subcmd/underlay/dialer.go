@@ -19,7 +19,7 @@ package underlay
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/channel"
+	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/dotziti"
 	"github.com/openziti/foundation/transport"
 	"github.com/spf13/cobra"
@@ -59,7 +59,6 @@ func runDialer(_ *cobra.Command, _ []string) {
 
 	log := pfxlog.Logger()
 	options := channel.DefaultOptions()
-	options.BindHandlers = []channel.BindHandler{&bindHandler{}}
 
 	var dialer channel.UnderlayFactory
 	switch dialerUnderlay {
@@ -71,7 +70,7 @@ func runDialer(_ *cobra.Command, _ []string) {
 		panic(fmt.Errorf("unknown underlay [%s]", dialerUnderlay))
 	}
 
-	ch, err := channel.NewChannel("channel", dialer, options)
+	ch, err := channel.NewChannel("channel", dialer, &bindHandler{}, options)
 	if err != nil {
 		panic(err)
 	}
