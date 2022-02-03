@@ -17,9 +17,9 @@
 package underlay
 
 import (
-	"github.com/openziti/foundation/channel"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/channel"
 )
 
 const contentType = 99
@@ -33,8 +33,8 @@ func newMessage(count int) *channel.Message {
 
 type bindHandler struct{}
 
-func (h *bindHandler) BindChannel(ch channel.Channel) error {
-	ch.AddReceiveHandler(&receiveHandler{})
+func (h *bindHandler) BindChannel(binding channel.Binding) error {
+	binding.AddTypedReceiveHandler(&receiveHandler{})
 	return nil
 }
 

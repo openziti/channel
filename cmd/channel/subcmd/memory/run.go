@@ -18,8 +18,9 @@ package underlay
 
 import (
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/channel"
-	"github.com/openziti/foundation/channel/cmd/channel/subcmd"
+	"github.com/openziti/channel"
+	"github.com/openziti/channel/cmd/channel/subcmd"
+	"github.com/openziti/channel/memory"
 	"github.com/openziti/foundation/identity/dotziti"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/spf13/cobra"
@@ -27,12 +28,12 @@ import (
 )
 
 func init() {
-	memory.Flags().StringVarP(&memoryIdentity, "identity", "i", "default", ".ziti Identity")
-	memory.Flags().IntVarP(&memoryCount, "count", "c", 100, "number of messages to send")
-	subcmd.Root.AddCommand(memory)
+	memoryCmd.Flags().StringVarP(&memoryIdentity, "identity", "i", "default", ".ziti Identity")
+	memoryCmd.Flags().IntVarP(&memoryCount, "count", "c", 100, "number of messages to send")
+	subcmd.Root.AddCommand(memoryCmd)
 }
 
-var memory = &cobra.Command{
+var memoryCmd = &cobra.Command{
 	Use:   "memory",
 	Short: "colocated dialer/listener using memory underlay",
 	Run:   runMemory,
@@ -49,7 +50,7 @@ func runMemory(_ *cobra.Command, _ []string) {
 		panic(err)
 	}
 
-	ctx := channel.NewMemoryContext()
+	ctx := memory.NewMemoryContext()
 	go handleDialer(id, ctx)
 	go runListener(id, ctx)
 
@@ -63,14 +64,13 @@ func runMemory(_ *cobra.Command, _ []string) {
 	/* */
 }
 
-func handleDialer(identity *identity.TokenId, ctx *channel.MemoryContext) {
+func handleDialer(identity *identity.TokenId, ctx *memory.MemoryContext) {
 	log := pfxlog.Logger()
 
 	options := channel.DefaultOptions()
-	options.BindHandlers = []channel.BindHandler{&bindHandler{}}
 
-	dialer := channel.NewMemoryDialer(identity, nil, ctx)
-	ch, err := channel.NewChannel("memory", dialer, options)
+	dialer := memory.NewMemoryDialer(identity, nil, ctx)
+	ch, err := channel.NewChannel("memory", dialer, &bindHandler{}, options)
 	if err != nil {
 		panic(err)
 	}
@@ -92,18 +92,16 @@ func handleDialer(identity *identity.TokenId, ctx *channel.MemoryContext) {
 	close(dialerDone)
 }
 
-func runListener(identity *identity.TokenId, ctx *channel.MemoryContext) {
+func runListener(identity *identity.TokenId, ctx *memory.MemoryContext) {
 	log := pfxlog.Logger()
 
-	listener := channel.NewMemoryListener(identity, ctx)
+	listener := memory.NewMemoryListener(identity, ctx)
 	if err := listener.Listen(); err != nil {
 		panic(err)
 	}
 
 	options := channel.DefaultOptions()
-	options.BindHandlers = []channel.BindHandler{&bindHandler{}}
-
-	ch, err := channel.NewChannel("memory", listener, options)
+	ch, err := channel.NewChannel("memory", listener, &bindHandler{}, options)
 	if err != nil {
 		panic(err)
 	}
