@@ -291,6 +291,52 @@ func TestCleanup(t *testing.T) {
 	req.False(delta > 10, "should be less than 10 goroutines after starting, stopping, were %v", delta)
 }
 
+func TestCloseInBind(t *testing.T) {
+	server := newEchoServer()
+	server.start(t)
+	defer server.stop(t)
+
+	req := require.New(t)
+
+	options := DefaultOptions()
+	options.WriteTimeout = 100 * time.Millisecond
+
+	addr, err := tcp.AddressParser{}.Parse(testAddress)
+	req.NoError(err)
+
+	clientId := &identity.TokenId{Token: "echo-client"}
+	underlayFactory := NewClassicDialer(clientId, addr, nil)
+
+	errC := make(chan error, 1)
+
+	var ch Channel
+
+	bindHandler := func(binding Binding) error {
+		ch = binding.GetChannel()
+		go func() {
+			var err error
+			for i := 0; i < 10; i++ {
+				if err = NewMessage(ContentTypePingType, nil).WithTimeout(10 * time.Millisecond).Send(ch); err != nil {
+					errC <- err
+					break
+				}
+			}
+
+		}()
+		return errors.New("test")
+	}
+
+	_, err = NewChannel("echo-test", underlayFactory, BindHandlerF(bindHandler), options)
+	req.EqualError(err, "test")
+	req.True(ch.IsClosed())
+	select {
+	case err = <-errC:
+	case <-time.After(time.Millisecond * 100):
+		t.Fatal("timed out")
+	}
+	req.EqualError(err, "channel closed")
+}
+
 func dialServer(options *Options, t *testing.T) Channel {
 	req := require.New(t)
 	addr, err := tcp.AddressParser{}.Parse(testAddress)
