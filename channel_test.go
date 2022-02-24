@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -266,6 +267,28 @@ func TestPriorityOrdering(t *testing.T) {
 	highCtx.AssertNext(t, 10*time.Millisecond)
 	stdCtx.AssertNext(t, 10*time.Millisecond)
 	lowCtx.AssertNext(t, 10*time.Millisecond)
+}
+
+func TestCleanup(t *testing.T) {
+	server := newEchoServer()
+	server.start(t)
+	defer server.stop(t)
+
+	options := DefaultOptions()
+	options.WriteTimeout = 100 * time.Millisecond
+
+	req := require.New(t)
+
+	starting := runtime.NumGoroutine()
+
+	for i := 0; i < 100; i++ {
+		ch := dialServer(options, t)
+		req.NoError(ch.Close())
+	}
+
+	time.Sleep(25 * time.Millisecond)
+	delta := runtime.NumGoroutine() - starting
+	req.False(delta > 10, "should be less than 10 goroutines after starting, stopping, were %v", delta)
 }
 
 func dialServer(options *Options, t *testing.T) Channel {
