@@ -363,25 +363,23 @@ func (channel *channelImpl) txer() {
 
 		count := 0
 
-		pm, ok := <-channel.outQueue
-		if ok {
+		select {
+		case pm := <-channel.outQueue:
 			heap.Push(channel.outPriority, pm)
 			count++
-		} else {
+		case <-channel.closeNotify:
 			done = true
 			selecting = false
 		}
 
 		for selecting && count < 64 {
 			select {
-			case pm, ok := <-channel.outQueue:
-				if ok {
-					heap.Push(channel.outPriority, pm)
-					count++
-				} else {
-					done = true
-					selecting = false
-				}
+			case pm := <-channel.outQueue:
+				heap.Push(channel.outPriority, pm)
+				count++
+			case <-channel.closeNotify:
+				done = true
+				selecting = false
 			default:
 				selecting = false
 			}
