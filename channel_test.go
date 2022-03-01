@@ -18,7 +18,7 @@ import (
 var testAddress = "tcp:localhost:28433"
 
 func TestWriteAndReply(t *testing.T) {
-	server := newEchoServer()
+	server := newTestServer()
 	server.start(t)
 	defer server.stop(t)
 
@@ -27,7 +27,7 @@ func TestWriteAndReply(t *testing.T) {
 	options := DefaultOptions()
 	options.WriteTimeout = 100 * time.Millisecond
 
-	ch := dialServer(options, t)
+	ch := dialServer(options, t, nil)
 	defer func() { _ = ch.Close() }()
 
 	for i := 0; i < 10; i++ {
@@ -40,7 +40,7 @@ func TestWriteAndReply(t *testing.T) {
 }
 
 func TestSendTimeout(t *testing.T) {
-	server := newEchoServer()
+	server := newTestServer()
 	server.start(t)
 	defer server.stop(t)
 
@@ -49,7 +49,7 @@ func TestSendTimeout(t *testing.T) {
 	options := DefaultOptions()
 	options.WriteTimeout = 100 * time.Millisecond
 
-	ch := dialServer(options, t)
+	ch := dialServer(options, t, nil)
 	defer func() { _ = ch.Close() }()
 
 	msg := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0)))
@@ -74,7 +74,7 @@ func TestSendTimeout(t *testing.T) {
 }
 
 func TestInQueueTimeout(t *testing.T) {
-	server := newEchoServer()
+	server := newTestServer()
 	server.start(t)
 	defer server.stop(t)
 
@@ -83,7 +83,7 @@ func TestInQueueTimeout(t *testing.T) {
 	options := DefaultOptions()
 	options.WriteTimeout = 100 * time.Millisecond
 
-	ch := dialServer(options, t)
+	ch := dialServer(options, t, nil)
 	defer func() { _ = ch.Close() }()
 
 	msg := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0)))
@@ -120,7 +120,7 @@ func TestInQueueTimeout(t *testing.T) {
 }
 
 func TestReplyTimeout(t *testing.T) {
-	server := newEchoServer()
+	server := newTestServer()
 	server.pingHandler = server.echoPingsWithDelay
 	server.start(t)
 	defer server.stop(t)
@@ -130,7 +130,7 @@ func TestReplyTimeout(t *testing.T) {
 	options := DefaultOptions()
 	options.WriteTimeout = 100 * time.Millisecond
 
-	ch := dialServer(options, t)
+	ch := dialServer(options, t, nil)
 	defer func() { _ = ch.Close() }()
 
 	msg := NewMessage(ContentTypePingType, []byte("hello"))
@@ -149,7 +149,7 @@ func TestReplyTimeout(t *testing.T) {
 }
 
 func TestWriteTimeout(t *testing.T) {
-	server := newEchoServer()
+	server := newTestServer()
 	server.pingHandler = server.blockOnPing
 	server.start(t)
 	defer server.stop(t)
@@ -159,7 +159,7 @@ func TestWriteTimeout(t *testing.T) {
 	options := DefaultOptions()
 	options.WriteTimeout = 100 * time.Millisecond
 
-	ch := dialServer(options, t)
+	ch := dialServer(options, t, nil)
 	defer func() { _ = ch.Close() }()
 
 	var stop concurrenz.AtomicBoolean
@@ -192,7 +192,7 @@ func TestWriteTimeout(t *testing.T) {
 
 func TestNoWriteTimeout(t *testing.T) {
 	t.Skip("skipping long running test")
-	server := newEchoServer()
+	server := newTestServer()
 	server.pingHandler = server.blockOnPing
 	server.start(t)
 	defer server.stop(t)
@@ -201,7 +201,7 @@ func TestNoWriteTimeout(t *testing.T) {
 
 	options := DefaultOptions()
 
-	ch := dialServer(options, t)
+	ch := dialServer(options, t, nil)
 	defer func() { _ = ch.Close() }()
 
 	var stop concurrenz.AtomicBoolean
@@ -232,7 +232,7 @@ func TestNoWriteTimeout(t *testing.T) {
 }
 
 func TestPriorityOrdering(t *testing.T) {
-	server := newEchoServer()
+	server := newTestServer()
 	server.start(t)
 	defer server.stop(t)
 
@@ -241,7 +241,7 @@ func TestPriorityOrdering(t *testing.T) {
 	options := DefaultOptions()
 	options.WriteTimeout = 100 * time.Millisecond
 
-	ch := dialServer(options, t)
+	ch := dialServer(options, t, nil)
 	defer func() { _ = ch.Close() }()
 
 	msg := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0)))
@@ -270,7 +270,7 @@ func TestPriorityOrdering(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
-	server := newEchoServer()
+	server := newTestServer()
 	server.start(t)
 	defer server.stop(t)
 
@@ -282,7 +282,7 @@ func TestCleanup(t *testing.T) {
 	starting := runtime.NumGoroutine()
 
 	for i := 0; i < 100; i++ {
-		ch := dialServer(options, t)
+		ch := dialServer(options, t, nil)
 		req.NoError(ch.Close())
 	}
 
@@ -292,7 +292,7 @@ func TestCleanup(t *testing.T) {
 }
 
 func TestCloseInBind(t *testing.T) {
-	server := newEchoServer()
+	server := newTestServer()
 	server.start(t)
 	defer server.stop(t)
 
@@ -337,7 +337,7 @@ func TestCloseInBind(t *testing.T) {
 	req.EqualError(err, "channel closed")
 }
 
-func dialServer(options *Options, t *testing.T) Channel {
+func dialServer(options *Options, t *testing.T, bindHandler BindHandler) Channel {
 	req := require.New(t)
 	addr, err := tcp.AddressParser{}.Parse(testAddress)
 	req.NoError(err)
@@ -345,20 +345,20 @@ func dialServer(options *Options, t *testing.T) Channel {
 	clientId := &identity.TokenId{Token: "echo-client"}
 	underlayFactory := NewClassicDialer(clientId, addr, nil)
 
-	ch, err := NewChannel("echo-test", underlayFactory, nil, options)
+	ch, err := NewChannel("echo-test", underlayFactory, bindHandler, options)
 	req.NoError(err)
 
 	return ch
 }
 
-func newEchoServer() *echoServer {
+func newTestServer() *testServer {
 	options := DefaultOptions()
 	options.MaxOutstandingConnects = 1
 	options.MaxQueuedConnects = 1
 	options.WriteTimeout = 1 * time.Second
 	options.ConnectTimeoutMs = 1000
 
-	result := &echoServer{
+	result := &testServer{
 		options:   options,
 		blockChan: make(chan struct{}),
 	}
@@ -366,15 +366,17 @@ func newEchoServer() *echoServer {
 	return result
 }
 
-type echoServer struct {
-	listener    UnderlayListener
-	options     *Options
-	pingHandler func(msg *Message, ch Channel)
-	blockChan   chan struct{}
+type testServer struct {
+	listener      UnderlayListener
+	options       *Options
+	pingHandler   func(msg *Message, ch Channel)
+	blockChan     chan struct{}
+	acceptHandler func(ch Channel)
+	bindHandler   BindHandlerF
 }
 
-func (self *echoServer) start(t *testing.T) {
-	id := &identity.TokenId{Token: "echo-server"}
+func (self *testServer) start(t *testing.T) {
+	id := &identity.TokenId{Token: "test-server"}
 	addr, err := tcp.AddressParser{}.Parse(testAddress)
 	require.NoError(t, err)
 	self.listener = NewClassicListener(id, addr, DefaultConnectOptions(), nil)
@@ -384,7 +386,7 @@ func (self *echoServer) start(t *testing.T) {
 	go self.accept()
 }
 
-func (self *echoServer) stop(t *testing.T) {
+func (self *testServer) stop(t *testing.T) {
 	if self.listener != nil {
 		require.NoError(t, self.listener.Close())
 		require.NoError(t, netz.WaitForPortGone("localhost:28433", time.Second*2))
@@ -396,26 +398,34 @@ func (self *echoServer) stop(t *testing.T) {
 	}
 }
 
-func (self *echoServer) accept() {
+func (self *testServer) accept() {
 	counter := 0
 
-	bindHandler := func(binding Binding) error {
-		binding.AddReceiveHandlerF(ContentTypePingType, self.pingHandler)
-		return nil
+	var bindHandler BindHandlerF
+	if self.bindHandler != nil {
+		bindHandler = self.bindHandler
+	} else {
+		bindHandler = func(binding Binding) error {
+			binding.AddReceiveHandlerF(ContentTypePingType, self.pingHandler)
+			return nil
+		}
 	}
 
 	for {
 		counter++
 
-		_, err := NewChannel(fmt.Sprintf("echo-server-%v", counter), self.listener, BindHandlerF(bindHandler), self.options)
+		ch, err := NewChannel(fmt.Sprintf("test-server-%v", counter), self.listener, BindHandlerF(bindHandler), self.options)
 		if err != nil {
-			logrus.WithError(err).Error("echo listener error, exiting")
+			logrus.WithError(err).Error("test listener error, exiting")
 			return
+		}
+		if self.acceptHandler != nil {
+			self.acceptHandler(ch)
 		}
 	}
 }
 
-func (self *echoServer) echoPings(msg *Message, ch Channel) {
+func (self *testServer) echoPings(msg *Message, ch Channel) {
 	reply := NewResult(true, string(msg.Body))
 	reply.ReplyTo(msg)
 	if err := ch.Send(reply); err != nil {
@@ -423,7 +433,7 @@ func (self *echoServer) echoPings(msg *Message, ch Channel) {
 	}
 }
 
-func (self *echoServer) echoPingsWithDelay(msg *Message, ch Channel) {
+func (self *testServer) echoPingsWithDelay(msg *Message, ch Channel) {
 	time.Sleep(100 * time.Millisecond)
 	reply := NewResult(true, string(msg.Body))
 	reply.ReplyTo(msg)
@@ -432,7 +442,7 @@ func (self *echoServer) echoPingsWithDelay(msg *Message, ch Channel) {
 	}
 }
 
-func (self *echoServer) blockOnPing(*Message, Channel) {
+func (self *testServer) blockOnPing(*Message, Channel) {
 	<-self.blockChan
 }
 

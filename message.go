@@ -43,6 +43,8 @@ const (
 	ResultSuccessHeader             = 2
 	HelloRouterAdvertisementsHeader = 3
 	HelloVersionHeader              = 4
+	HeartbeatHeader                 = 5
+	HeartbeatResponseHeader         = 6
 
 	// Headers in the range 128-255 inclusive will be reflected when creating replies
 	ReflectedHeaderBitMask = 1 << 7
