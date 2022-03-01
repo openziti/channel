@@ -17,11 +17,11 @@
 package trace
 
 import (
-	"github.com/openziti/foundation/trace/pb"
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/openziti/channel/trace/pb"
 	"io"
 )
 
@@ -32,8 +32,12 @@ func WriteChannelState(s *trace_pb.ChannelState, writer io.Writer) error {
 	}
 
 	out := new(bytes.Buffer)
-	binary.Write(out, binary.LittleEndian, int32(trace_pb.MessageType_ChannelStateType))
-	binary.Write(out, binary.LittleEndian, int32(len(data)))
+	if err = binary.Write(out, binary.LittleEndian, int32(trace_pb.MessageType_ChannelStateType)); err != nil {
+		return err
+	}
+	if err = binary.Write(out, binary.LittleEndian, int32(len(data))); err != nil {
+		return err
+	}
 	out.Write(data)
 
 	n, err := writer.Write(out.Bytes())
@@ -54,8 +58,12 @@ func WriteChannelMessage(t *trace_pb.ChannelMessage, writer io.Writer) error {
 	}
 
 	out := new(bytes.Buffer)
-	binary.Write(out, binary.LittleEndian, int32(trace_pb.MessageType_ChannelMessageType))
-	binary.Write(out, binary.LittleEndian, int32(len(data)))
+	if err = binary.Write(out, binary.LittleEndian, int32(trace_pb.MessageType_ChannelMessageType)); err != nil {
+		return err
+	}
+	if err = binary.Write(out, binary.LittleEndian, int32(len(data))); err != nil {
+		return err
+	}
 	out.Write(data)
 
 	n, err := writer.Write(out.Bytes())

@@ -21,7 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/openziti/foundation/trace/pb"
+	"github.com/openziti/channel/trace/pb"
 	"io"
 	"os"
 )

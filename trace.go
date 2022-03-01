@@ -19,8 +19,8 @@ package channel
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/trace"
-	"github.com/openziti/foundation/trace/pb"
+	"github.com/openziti/channel/trace"
+	"github.com/openziti/channel/trace/pb"
 	"github.com/sirupsen/logrus"
 	"os"
 	"time"
