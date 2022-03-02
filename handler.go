@@ -97,6 +97,18 @@ type ErrorHandler interface {
 	HandleError(err error, ch Channel)
 }
 
+type ErrorHandlerF func(err error, ch Channel)
+
+func (self ErrorHandlerF) HandleError(err error, ch Channel) {
+	self(err, ch)
+}
+
 type CloseHandler interface {
 	HandleClose(ch Channel)
+}
+
+type CloseHandlerF func(ch Channel)
+
+func (self CloseHandlerF) HandleClose(ch Channel) {
+	self(ch)
 }

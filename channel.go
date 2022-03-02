@@ -112,7 +112,7 @@ type SendListener interface {
 	NotifyErr(error)
 }
 
-// ReplyReceiver is used to get notified when a Message
+// ReplyReceiver is used to get notified when a Message reply arrives
 type ReplyReceiver interface {
 	AcceptReply(*Message)
 }
