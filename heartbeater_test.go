@@ -155,12 +155,14 @@ func TestBusyHeartbeat(t *testing.T) {
 	default:
 	}
 
-	fmt.Printf("count:  %v\nremote: %v\n", count, remoteCount)
+	fmt.Printf("count:  %v\nremote: %v\nchecks: %v\n", count, remoteCount, hb.checkCount)
 
 	req.True(hb.localCount > 8)
 	req.True(hb.localCount < 12)
 	req.True(hb.remoteCount > 8)
 	req.True(hb.remoteCount < 12)
+	req.True(hb.checkCount > 80)
+	req.True(hb.remoteCount < 120)
 }
 
 func TestQuietHeartbeat(t *testing.T) {
@@ -253,6 +255,7 @@ type heartbeatTracker struct {
 	id          string
 	localCount  int
 	remoteCount int
+	checkCount  int
 }
 
 func (self *heartbeatTracker) HeartbeatTx(ts int64) {
@@ -274,7 +277,7 @@ func (self *heartbeatTracker) HeartbeatRespRx(ts int64) {
 }
 
 func (self *heartbeatTracker) CheckHeartBeat() {
-	fmt.Printf("%v: checkin time\n", self.id)
+	self.checkCount++
 }
 
 func (self *heartbeatTracker) HeartbeatReceived(*Message, Channel) {
