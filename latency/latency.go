@@ -114,11 +114,16 @@ const (
 )
 
 type Handler interface {
-	LatencyReported(latencyType Type, latency time.Duration)
-	ChannelClosed()
+	HandleLatency(latencyType Type, latency time.Duration)
 }
 
-func AddLatencyProbe(ch channel.Channel, binding channel.Binding, interval time.Duration, roundTripFreq uint8, handler Handler) {
+type HandlerF func(latencyType Type, latency time.Duration)
+
+func (self HandlerF) HandleLatency(latencyType Type, latency time.Duration) {
+	self(latencyType, latency)
+}
+
+func AddLatencyProbe(ch channel.Channel, binding channel.Binding, interval time.Duration, roundTripFreq uint8, handler HandlerF) {
 	probe := &latencyProbe{
 		handler:       handler,
 		ch:            ch,
@@ -130,7 +135,7 @@ func AddLatencyProbe(ch channel.Channel, binding channel.Binding, interval time.
 }
 
 type latencyProbe struct {
-	handler       Handler
+	handler       HandlerF
 	ch            channel.Channel
 	interval      time.Duration
 	roundTripFreq uint8
@@ -144,7 +149,7 @@ func (self *latencyProbe) ContentType() int32 {
 func (self *latencyProbe) HandleReceive(m *channel.Message, _ channel.Channel) {
 	if sentTime, ok := m.GetUint64Header(probeTime); ok {
 		latency := time.Duration(time.Now().UnixNano() - int64(sentTime))
-		self.handler.LatencyReported(RoundTripType, latency)
+		self.handler(RoundTripType, latency)
 	} else {
 		pfxlog.Logger().Error("no send time on latency response")
 	}
@@ -153,7 +158,6 @@ func (self *latencyProbe) HandleReceive(m *channel.Message, _ channel.Channel) {
 func (self *latencyProbe) run() {
 	if self.ch.IsClosed() {
 		pfxlog.ContextLogger(self.ch.Label()).Debug("exited")
-		self.handler.ChannelClosed()
 		return
 	}
 
@@ -165,8 +169,8 @@ func (self *latencyProbe) run() {
 		self.count = 0
 	} else {
 		sendable = &SendTimeTracker{
-			handler:   self.handler,
-			startTime: time.Now(),
+			Handler:   self.handler,
+			StartTime: time.Now(),
 		}
 	}
 	if err := self.ch.Send(sendable); err != nil {
@@ -184,8 +188,8 @@ func (self *latencyProbe) run() {
 type SendTimeTracker struct {
 	channel.BaseSendable
 	channel.BaseSendListener
-	handler   Handler
-	startTime time.Time
+	Handler   HandlerF
+	StartTime time.Time
 	seq       int32
 }
 
@@ -202,8 +206,8 @@ func (self *SendTimeTracker) SendListener() channel.SendListener {
 }
 
 func (self *SendTimeTracker) NotifyBeforeWrite() {
-	t := time.Now().Sub(self.startTime)
-	self.handler.LatencyReported(BeforeSendType, t)
+	t := time.Now().Sub(self.StartTime)
+	self.Handler(BeforeSendType, t)
 }
 
 type RoundTripLatency struct {

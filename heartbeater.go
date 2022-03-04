@@ -101,6 +101,7 @@ func (self *heartbeater) pulse(checkInterval time.Duration) {
 			if now-lastHeartbeatTx > self.heartBeatIntervalNs {
 				self.sendHeartbeat()
 			}
+			self.callback.CheckHeartBeat()
 
 		case event := <-self.events:
 			event.handle(self)
