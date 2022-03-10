@@ -356,7 +356,7 @@ func newTestServer() *testServer {
 	options.MaxOutstandingConnects = 1
 	options.MaxQueuedConnects = 1
 	options.WriteTimeout = 1 * time.Second
-	options.ConnectTimeoutMs = 1000
+	options.ConnectTimeout = time.Second
 
 	result := &testServer{
 		options:   options,

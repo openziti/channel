@@ -83,7 +83,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 
 	timeout := time.Duration(0)
 	if options != nil {
-		timeout = time.Duration(options.ConnectTimeoutMs) * time.Millisecond
+		timeout = time.Duration(options.ConnectTimeout) * time.Millisecond
 	}
 
 	underlay, err := underlayFactory.Create(timeout, tcfg)
@@ -102,7 +102,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 }
 
 func AcceptNextChannel(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options, tcfg transport.Configuration) error {
-	underlay, err := underlayFactory.Create(options.ConnectTimeout(), tcfg)
+	underlay, err := underlayFactory.Create(options.ConnectTimeout, tcfg)
 	if err != nil {
 		return err
 	}

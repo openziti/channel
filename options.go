@@ -41,7 +41,7 @@ func DefaultConnectOptions() ConnectOptions {
 	return ConnectOptions{
 		MaxQueuedConnects:      DefaultQueuedConnects,
 		MaxOutstandingConnects: DefaultOutstandingConnects,
-		ConnectTimeoutMs:       DefaultConnectTimeout,
+		ConnectTimeout:         DefaultConnectTimeout,
 	}
 }
 
@@ -68,7 +68,7 @@ func LoadOptions(data map[interface{}]interface{}) (*Options, error) {
 
 	if value, found := data["connectTimeoutMs"]; found {
 		if intVal, ok := value.(int); ok {
-			options.ConnectTimeoutMs = time.Duration(intVal) * time.Millisecond
+			options.ConnectTimeout = time.Duration(intVal) * time.Millisecond
 		}
 	}
 
@@ -98,7 +98,7 @@ func (o Options) String() string {
 type ConnectOptions struct {
 	MaxQueuedConnects      int
 	MaxOutstandingConnects int
-	ConnectTimeoutMs       time.Duration
+	ConnectTimeout         time.Duration
 }
 
 func (co *ConnectOptions) Validate() error {
@@ -137,15 +137,11 @@ func (co *ConnectOptions) validateOutstandingConnects() error {
 }
 
 func (co *ConnectOptions) validateConnectTimeout() error {
-	if co.ConnectTimeoutMs < MinConnectTimeout {
+	if co.ConnectTimeout < MinConnectTimeout {
 		return fmt.Errorf("connectTimeoutMs must be at least %d ms", MinConnectTimeout.Milliseconds())
-	} else if co.ConnectTimeoutMs > MaxConnectTimeout {
+	} else if co.ConnectTimeout > MaxConnectTimeout {
 		return fmt.Errorf("connectTimeoutMs must be at most %d ms", MaxConnectTimeout.Milliseconds())
 	}
 
 	return nil
-}
-
-func (co *ConnectOptions) ConnectTimeout() time.Duration {
-	return co.ConnectTimeoutMs
 }

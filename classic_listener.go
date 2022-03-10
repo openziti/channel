@@ -111,7 +111,7 @@ func (listener *classicListener) listener(incoming chan transport.Connection) {
 			if connectionId, err := NextConnectionId(); err == nil {
 				impl.connectionId = connectionId
 
-				if err := peer.SetReadTimeout(listener.connectOptions.ConnectTimeout()); err != nil {
+				if err := peer.SetReadTimeout(listener.connectOptions.ConnectTimeout); err != nil {
 					log.Errorf("could not set read timeout for [%s] (%v)", peer.Detail().Address, err)
 					_ = peer.Close()
 					continue
