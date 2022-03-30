@@ -22,60 +22,73 @@ import (
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/transport"
+	"net"
 	"time"
 )
 
-type classicDialer struct {
-	identity *identity.TokenId
-	endpoint transport.Address
-	headers  map[int32][]byte
+type existingConnDialer struct {
+	id      *identity.TokenId
+	peer    net.Conn
+	headers map[int32][]byte
 }
 
-func NewClassicDialer(identity *identity.TokenId, endpoint transport.Address, headers map[int32][]byte) UnderlayFactory {
-	return &classicDialer{
-		identity: identity,
-		endpoint: endpoint,
-		headers:  headers,
+func NewExistingConnDialer(id *identity.TokenId, peer net.Conn, headers map[int32][]byte) UnderlayFactory {
+	return &existingConnDialer{
+		id:      id,
+		peer:    peer,
+		headers: headers,
 	}
 }
 
-func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Configuration) (Underlay, error) {
-	log := pfxlog.ContextLogger(dialer.endpoint.String())
+func (self *existingConnDialer) Create(timeout time.Duration, _ transport.Configuration) (Underlay, error) {
+	log := pfxlog.Logger()
 	log.Debug("started")
 	defer log.Debug("exited")
 
 	version := uint32(2)
 	tryCount := 0
 
-	for {
-		peer, err := dialer.endpoint.Dial("classic", dialer.identity, timeout, tcfg)
-		if err != nil {
-			return nil, err
+	defer func() {
+		if err := self.peer.SetDeadline(time.Time{}); err != nil { // clear write deadline
+			log.WithError(err).Error("unable to clear write deadline")
 		}
+	}()
 
-		impl := newClassicImpl(peer, version)
-		if err := dialer.sendHello(impl); err != nil {
+	for {
+		impl := newExistingImpl(self.peer, version)
+
+		if timeout > 0 {
+			if err := self.peer.SetDeadline(time.Now().Add(timeout)); err != nil {
+				return nil, err
+			}
+		}
+		if err := self.sendHello(impl); err != nil {
 			if tryCount > 0 {
 				return nil, err
 			} else {
 				log.WithError(err).Warnf("error initiating channel with hello")
 			}
 			tryCount++
-			version, _ = getRetryVersion(err)
+			if retryVersion, _ := getRetryVersion(err); retryVersion != version {
+				version = retryVersion
+			} else {
+				return nil, err
+			}
+
 			log.Warnf("Retrying dial with protocol version %v", version)
 			continue
 		}
-		impl.id = dialer.identity
+		impl.id = self.id
 		return impl, nil
 	}
 }
 
-func (dialer *classicDialer) sendHello(impl *classicImpl) error {
+func (self *existingConnDialer) sendHello(impl *existingConnImpl) error {
 	log := pfxlog.ContextLogger(impl.Label())
 	defer log.Debug("exited")
 	log.Debug("started")
 
-	request := NewHello(dialer.identity.Token, dialer.headers)
+	request := NewHello(self.id.Token, self.headers)
 	request.sequence = HelloSequence
 	if err := impl.Tx(request); err != nil {
 		_ = impl.peer.Close()

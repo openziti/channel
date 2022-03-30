@@ -20,7 +20,7 @@ import (
 	"context"
 	"crypto/x509"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/foundation/transport"
+	"github.com/openziti/transport"
 	"github.com/pkg/errors"
 	"io"
 	"time"

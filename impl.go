@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/foundation/transport"
+	"github.com/openziti/transport"
 	"github.com/openziti/foundation/util/concurrenz"
 	"github.com/openziti/foundation/util/info"
 	"github.com/openziti/foundation/util/sequence"
@@ -83,7 +83,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 
 	timeout := time.Duration(0)
 	if options != nil {
-		timeout = time.Duration(options.ConnectTimeout) * time.Millisecond
+		timeout = options.ConnectTimeout
 	}
 
 	underlay, err := underlayFactory.Create(timeout, tcfg)
