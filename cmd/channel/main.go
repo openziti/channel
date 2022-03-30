@@ -20,7 +20,6 @@ import (
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/channel/cmd/channel/subcmd"
 	"github.com/openziti/foundation/transport"
-	"github.com/openziti/foundation/transport/quic"
 	"github.com/openziti/foundation/transport/tcp"
 	"github.com/openziti/foundation/transport/tls"
 	"github.com/openziti/foundation/transport/transwarp"
@@ -29,7 +28,6 @@ import (
 )
 
 func init() {
-	transport.AddAddressParser(quic.AddressParser{})
 	transport.AddAddressParser(tcp.AddressParser{})
 	transport.AddAddressParser(tls.AddressParser{})
 	transport.AddAddressParser(transwarp.AddressParser{})

@@ -83,7 +83,7 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 
 	timeout := time.Duration(0)
 	if options != nil {
-		timeout = time.Duration(options.ConnectTimeout) * time.Millisecond
+		timeout = options.ConnectTimeout
 	}
 
 	underlay, err := underlayFactory.Create(timeout, tcfg)
