@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/foundation/transport/tcp"
+	"github.com/openziti/transport/tcp"
 	"time"
 )
 

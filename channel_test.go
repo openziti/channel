@@ -3,7 +3,7 @@ package channel
 import (
 	"fmt"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/foundation/transport/tcp"
+	"github.com/openziti/transport/tcp"
 	"github.com/openziti/foundation/util/concurrenz"
 	"github.com/openziti/foundation/util/netz"
 	"github.com/pkg/errors"

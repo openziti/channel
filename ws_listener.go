@@ -18,7 +18,7 @@ package channel
 
 import (
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/transport"
+	"github.com/openziti/transport"
 )
 
 type wsListener struct {

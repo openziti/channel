@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/foundation/transport"
+	"github.com/openziti/transport"
 	"sync"
 	"time"
 )
