@@ -57,6 +57,7 @@ func NewReconnectingDialerWithHandlerAndLocalBinding(identity *identity.TokenId,
 	return &reconnectingDialer{
 		identity:         identity,
 		endpoint:         endpoint,
+		localBinding:     localBinding,
 		headers:          headers,
 		reconnectHandler: reconnectHandler,
 	}
