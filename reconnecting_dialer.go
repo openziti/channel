@@ -29,6 +29,7 @@ import (
 type reconnectingDialer struct {
 	identity         *identity.TokenId
 	endpoint         transport.Address
+	localBinding     string
 	headers          map[int32][]byte
 	tcfg             transport.Configuration
 	reconnectLock    sync.Mutex
@@ -52,6 +53,16 @@ func NewReconnectingDialerWithHandler(identity *identity.TokenId, endpoint trans
 	}
 }
 
+func NewReconnectingDialerWithHandlerAndLocalBinding(identity *identity.TokenId, endpoint transport.Address, localBinding string, headers map[int32][]byte, reconnectHandler func()) UnderlayFactory {
+	return &reconnectingDialer{
+		identity:         identity,
+		endpoint:         endpoint,
+		localBinding:     localBinding,
+		headers:          headers,
+		reconnectHandler: reconnectHandler,
+	}
+}
+
 func (dialer *reconnectingDialer) Create(timeout time.Duration, tcfg transport.Configuration) (Underlay, error) {
 	log := pfxlog.ContextLogger(dialer.endpoint.String())
 	log.Debug("started")
@@ -61,7 +72,7 @@ func (dialer *reconnectingDialer) Create(timeout time.Duration, tcfg transport.C
 
 	version := uint32(2)
 
-	peer, err := dialer.endpoint.Dial("reconnecting", dialer.identity, timeout, tcfg)
+	peer, err := dialer.endpoint.DialWithLocalBinding("reconnecting", dialer.localBinding, dialer.identity, timeout, tcfg)
 	if err != nil {
 		return nil, err
 	}

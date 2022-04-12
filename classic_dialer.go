@@ -26,17 +26,23 @@ import (
 )
 
 type classicDialer struct {
-	identity *identity.TokenId
-	endpoint transport.Address
-	headers  map[int32][]byte
+	identity     *identity.TokenId
+	endpoint     transport.Address
+	localBinding string
+	headers      map[int32][]byte
+}
+
+func NewClassicDialerWithBindAddress(identity *identity.TokenId, endpoint transport.Address, localBinding string, headers map[int32][]byte) UnderlayFactory {
+	return &classicDialer{
+		identity:     identity,
+		endpoint:     endpoint,
+		localBinding: localBinding,
+		headers:      headers,
+	}
 }
 
 func NewClassicDialer(identity *identity.TokenId, endpoint transport.Address, headers map[int32][]byte) UnderlayFactory {
-	return &classicDialer{
-		identity: identity,
-		endpoint: endpoint,
-		headers:  headers,
-	}
+	return NewClassicDialerWithBindAddress(identity, endpoint, "", headers)
 }
 
 func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Configuration) (Underlay, error) {
@@ -47,8 +53,10 @@ func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Config
 	version := uint32(2)
 	tryCount := 0
 
+	log.Debugf("Attempting to dial with bind: %s", dialer.localBinding)
+
 	for {
-		peer, err := dialer.endpoint.Dial("classic", dialer.identity, timeout, tcfg)
+		peer, err := dialer.endpoint.DialWithLocalBinding("classic", dialer.localBinding, dialer.identity, timeout, tcfg)
 		if err != nil {
 			return nil, err
 		}
