@@ -53,7 +53,7 @@ func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Config
 	version := uint32(2)
 	tryCount := 0
 
-	log.Debug("Attempting to dial with bind: %s", dialer.localBinding)
+	log.Debugf("Attempting to dial with bind: %s", dialer.localBinding)
 
 	for {
 		peer, err := dialer.endpoint.DialWithLocalBinding("classic", dialer.localBinding, dialer.identity, timeout, tcfg)
