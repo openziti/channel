@@ -355,8 +355,8 @@ func readHello(peer io.Reader) (*Message, readFunction, marshalFunction, error) 
 	version := make([]byte, versionLen)
 	read, err := io.ReadFull(peer, version)
 
-	defaultReadF := readV2
-	defaultMarshalF := marshalV2
+	defaultReadF := ReadV2
+	defaultMarshalF := MarshalV2
 
 	if err != nil {
 		return nil, defaultReadF, defaultMarshalF, err
@@ -368,7 +368,7 @@ func readHello(peer io.Reader) (*Message, readFunction, marshalFunction, error) 
 
 	if bytes.Equal(version, magicV2) {
 		msg, err := readHelloV2(peer)
-		return msg, readV2, marshalV2, err
+		return msg, ReadV2, MarshalV2, err
 	}
 
 	return nil, defaultReadF, defaultMarshalF, UnknownVersionError
@@ -393,12 +393,8 @@ func readHelloV2(peer io.Reader) (*Message, error) {
 	return unmarshalV2(peer, messageSection, headersLength, bodyLength)
 }
 
-func ReadWSMessage(peer io.Reader) (*Message, error) {
-	return readV2(peer)
-}
-
-// readV2 reads a V2 message from the given reader and returns the unmarshalled message
-func readV2(peer io.Reader) (*Message, error) {
+// ReadV2 reads a V2 message from the given reader and returns the unmarshalled message
+func ReadV2(peer io.Reader) (*Message, error) {
 	messageSection := make([]byte, dataSectionV2)
 	read, err := io.ReadFull(peer, messageSection)
 	if err != nil {
@@ -496,8 +492,8 @@ func unmarshalHeaders(headerData []byte) (map[int32][]byte, error) {
 	return out, nil
 }
 
-// marshalV2 converts a *Message into a block of V2 wire format data.
-func marshalV2(m *Message) ([]byte, error) {
+// MarshalV2 converts a *Message into a block of V2 wire format data.
+func MarshalV2(m *Message) ([]byte, error) {
 	return marshalWithVersion(m, magicV2)
 }
 
