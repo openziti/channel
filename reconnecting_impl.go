@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/transport"
 	"github.com/openziti/foundation/util/concurrenz"
+	"github.com/openziti/transport"
 	"github.com/pkg/errors"
 	"io"
 	"time"
@@ -123,16 +123,16 @@ func newReconnectingImpl(peer transport.Connection, reconnectionHandler reconnec
 	return &reconnectingImpl{
 		peer:                peer,
 		reconnectionHandler: reconnectionHandler,
-		readF:               readV2,
-		marshalF:            marshalV2,
+		readF:               ReadV2,
+		marshalF:            MarshalV2,
 		timeout:             timeout,
 	}
 }
 
 func (impl *reconnectingImpl) setProtocolVersion(version uint32) {
 	if version == 2 {
-		impl.readF = readV2
-		impl.marshalF = marshalV2
+		impl.readF = ReadV2
+		impl.marshalF = MarshalV2
 	} else {
 		pfxlog.Logger().Warnf("asked to set unsupported protocol version %v", version)
 	}

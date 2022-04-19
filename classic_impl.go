@@ -113,14 +113,14 @@ func (impl *classicImpl) IsClosed() bool {
 }
 
 func newClassicImpl(peer transport.Connection, version uint32) *classicImpl {
-	readF := readV2
-	marshalF := marshalV2
+	readF := ReadV2
+	marshalF := MarshalV2
 
 	if version == 2 {
-		readF = readV2
-		marshalF = marshalV2
+		readF = ReadV2
+		marshalF = MarshalV2
 	} else if version == 3 { // currently only used for testing fallback to a common protocol version
-		readF = readV2
+		readF = ReadV2
 		marshalF = marshalV3
 	}
 

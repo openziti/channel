@@ -113,14 +113,14 @@ func (impl *wsImpl) IsClosed() bool {
 }
 
 func newWSImpl(peer transport.Connection, version uint32) *wsImpl {
-	readF := readV2
-	marshalF := marshalV2
+	readF := ReadV2
+	marshalF := MarshalV2
 
 	if version == 2 {
-		readF = readV2
-		marshalF = marshalV2
+		readF = ReadV2
+		marshalF = MarshalV2
 	} else if version == 3 { // currently only used for testing fallback to a common protocol version
-		readF = readV2
+		readF = ReadV2
 		marshalF = marshalV3
 	}
 
