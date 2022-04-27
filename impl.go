@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/transport"
 	"github.com/openziti/foundation/util/concurrenz"
 	"github.com/openziti/foundation/util/info"
 	"github.com/openziti/foundation/util/sequence"
+	"github.com/openziti/transport"
 	"github.com/pkg/errors"
 	"io"
 	"sync"
@@ -337,9 +337,8 @@ func (channel *channelImpl) rxer() {
 
 			} else if anyHandler, found := channel.receiveHandlers[AnyContentType]; found {
 				anyHandler.HandleReceive(m, channel)
-
 			} else {
-				log.Warnf("dropped message [%d]", m.ContentType)
+				log.Warnf("dropped message. type [%d], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, m.ReplyFor())
 			}
 		}
 	}
@@ -494,6 +493,7 @@ func (self *waiterMap) reapExpired(now int64) {
 		if w, ok := value.(*waiter); !ok || w.ttlMs < now {
 			self.m.Delete(key)
 			deleteCount++
+			pfxlog.Logger().Debugf("removed waiter for %v. ttl: %v, now: %v", key, w.ttlMs, now)
 		}
 		return true
 	})
