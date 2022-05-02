@@ -66,12 +66,33 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 		return data, true
 
 	case ContentTypeLatencyType:
-		data, err := NewTraceMessageDecode(DECODER, "Latency").MarshalTraceMessageDecode()
+		meta := NewTraceMessageDecode(DECODER, "Latency")
+		meta["probeTime"], _ = msg.GetUint64Header(128)
+		data, err := meta.MarshalTraceMessageDecode()
 		if err != nil {
 			pfxlog.Logger().Errorf("unexpected error (%s)", err)
 			return nil, true
 		}
 
+		return data, true
+
+	case ContentTypeLatencyResponseType:
+		meta := NewTraceMessageDecode(DECODER, "LatencyResponse")
+		meta["probeTime"], _ = msg.GetUint64Header(128)
+		data, err := meta.MarshalTraceMessageDecode()
+		if err != nil {
+			pfxlog.Logger().Errorf("unexpected error (%s)", err)
+			return nil, true
+		}
+		return data, true
+
+	case ContentTypeHeartbeat:
+		meta := NewTraceMessageDecode(DECODER, "Heartbeat")
+		data, err := meta.MarshalTraceMessageDecode()
+		if err != nil {
+			pfxlog.Logger().Errorf("unexpected error (%s)", err)
+			return nil, true
+		}
 		return data, true
 	}
 
