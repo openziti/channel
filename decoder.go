@@ -67,7 +67,7 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 
 	case ContentTypeLatencyType:
 		meta := NewTraceMessageDecode(DECODER, "Latency")
-		meta["probeType"], _ = msg.GetUint64Header(128)
+		meta["probeTime"], _ = msg.GetUint64Header(128)
 		data, err := meta.MarshalTraceMessageDecode()
 		if err != nil {
 			pfxlog.Logger().Errorf("unexpected error (%s)", err)
@@ -78,7 +78,7 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 
 	case ContentTypeLatencyResponseType:
 		meta := NewTraceMessageDecode(DECODER, "LatencyResponse")
-		meta["probeType"], _ = msg.GetUint64Header(128)
+		meta["probeTime"], _ = msg.GetUint64Header(128)
 		data, err := meta.MarshalTraceMessageDecode()
 		if err != nil {
 			pfxlog.Logger().Errorf("unexpected error (%s)", err)
