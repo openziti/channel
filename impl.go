@@ -28,6 +28,7 @@ import (
 	"github.com/openziti/transport"
 	"github.com/pkg/errors"
 	"io"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,7 +93,12 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 	}
 	impl.underlay = underlay
 
-	if err := bind(bindHandler, impl); err != nil {
+	if err = bind(bindHandler, impl); err != nil {
+		if closeErr := underlay.Close(); closeErr != nil {
+			if !errors.Is(closeErr, net.ErrClosed) {
+				pfxlog.ContextLogger(impl.Label()).WithError(err).Warn("error closing underlay")
+			}
+		}
 		return nil, err
 	}
 

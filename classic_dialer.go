@@ -69,7 +69,7 @@ func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Config
 				log.WithError(err).Warnf("error initiating channel with hello")
 			}
 			tryCount++
-			version, _ = getRetryVersion(err)
+			version, _ = GetRetryVersion(err)
 			log.Warnf("Retrying dial with protocol version %v", version)
 			continue
 		}

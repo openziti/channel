@@ -84,7 +84,7 @@ func (dialer *reconnectingDialer) Create(timeout time.Duration, tcfg transport.C
 		_ = peer.Close()
 		// If we bump channel protocol and need to handle multiple versions,
 		// we'll need to reintroduce version handling code here
-		// version, _ = getRetryVersion(err)
+		// version, _ = GetRetryVersion(err)
 		return nil, err
 	}
 
@@ -111,7 +111,7 @@ func (dialer *reconnectingDialer) Reconnect(impl *reconnectingImpl) error {
 					}
 					return nil
 				} else {
-					if version, ok := getRetryVersion(err); ok {
+					if version, ok := GetRetryVersion(err); ok {
 						impl.setProtocolVersion(version)
 					}
 					log.Errorf("hello attempt [#%d] failed (%s)", i+1, err)

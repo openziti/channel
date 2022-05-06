@@ -69,7 +69,7 @@ func (self *existingConnDialer) Create(timeout time.Duration, _ transport.Config
 				log.WithError(err).Warnf("error initiating channel with hello")
 			}
 			tryCount++
-			if retryVersion, _ := getRetryVersion(err); retryVersion != version {
+			if retryVersion, _ := GetRetryVersion(err); retryVersion != version {
 				version = retryVersion
 			} else {
 				return nil, err
