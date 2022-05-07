@@ -16,43 +16,45 @@
 
 syntax = "proto3";
 
-package trace_pb;
+package ziti.trace.pb;
+option go_package = "github.com/openziti/channel/trace/pb/trace_pb";
+
 
 enum MessageType {
-    ChannelStateType = 0;
-    ChannelMessageType = 1;
+  ChannelStateType = 0;
+  ChannelMessageType = 1;
 }
 
 message ChannelState {
-    int64 timestamp = 1;
-    string identity = 2;
-    string channel = 3;
-    bool connected = 4;
-    string remoteAddress = 5;
+  int64 timestamp = 1;
+  string identity = 2;
+  string channel = 3;
+  bool connected = 4;
+  string remoteAddress = 5;
 }
 
 message ChannelMessage {
-    int64 timestamp = 1;
-    string identity = 2;
-    string channel = 3;
-    bool isRx = 4;
-    int32 contentType = 5;
-    int32 sequence = 6;
-    int32 replyFor = 7;
-    int32 length = 8;
-    bytes decode = 9;
+  int64 timestamp = 1;
+  string identity = 2;
+  string channel = 3;
+  bool isRx = 4;
+  int32 contentType = 5;
+  int32 sequence = 6;
+  int32 replyFor = 7;
+  int32 length = 8;
+  bytes decode = 9;
 }
 
 enum TraceToggleVerbosity {
-    ReportNone = 0;
-    ReportMatches = 1;
-    ReportMisses = 2;
-    ReportAll = 3;
+  ReportNone = 0;
+  ReportMatches = 1;
+  ReportMisses = 2;
+  ReportAll = 3;
 }
 
 message TogglePipeTracesRequest {
-    bool enable = 1;
-    TraceToggleVerbosity verbosity = 2;
-    string appRegex = 3;
-    string pipeRegex = 4;
+  bool enable = 1;
+  TraceToggleVerbosity verbosity = 2;
+  string appRegex = 3;
+  string pipeRegex = 4;
 }
