@@ -626,7 +626,7 @@ func readUnknownVersionResponse(initial []byte, reader io.Reader) error {
 	return UnsupportedVersionError{supportedVersions: supported}
 }
 
-func getRetryVersion(err error) (uint32, bool) {
+func GetRetryVersion(err error) (uint32, bool) {
 	return getRetryVersionFor(err, 2, 2)
 }
 
