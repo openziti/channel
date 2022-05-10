@@ -575,7 +575,7 @@ func readUint32(data []byte) uint32 {
 	return binary.LittleEndian.Uint32(data)
 }
 
-func writeUnknownVersionResponse(writer io.Writer) {
+func WriteUnknownVersionResponse(writer io.Writer) {
 	data := new(bytes.Buffer)
 	data.Write(magicUnknownVersion)
 

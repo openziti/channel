@@ -18,14 +18,14 @@ package channel
 
 import (
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/transport"
+	"github.com/openziti/transport/v2"
 )
 
 type wsListener struct {
 	Impl *wsImpl
 }
 
-func NewWSListener(peer transport.Connection) *wsListener {
+func NewWSListener(peer transport.Conn) *wsListener {
 	impl := newWSImpl(peer, 2)
 
 	return &wsListener{

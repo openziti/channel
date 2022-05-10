@@ -22,7 +22,7 @@ import (
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/foundation/util/concurrenz"
-	"github.com/openziti/transport"
+	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"
 	"time"
@@ -119,7 +119,7 @@ func (impl *reconnectingImpl) IsClosed() bool {
 	return impl.closed.Get()
 }
 
-func newReconnectingImpl(peer transport.Connection, reconnectionHandler reconnectionHandler, timeout time.Duration) *reconnectingImpl {
+func newReconnectingImpl(peer transport.Conn, reconnectionHandler reconnectionHandler, timeout time.Duration) *reconnectingImpl {
 	return &reconnectingImpl{
 		peer:                peer,
 		reconnectionHandler: reconnectionHandler,
@@ -139,7 +139,7 @@ func (impl *reconnectingImpl) setProtocolVersion(version uint32) {
 }
 
 func (impl *reconnectingImpl) rx() (*Message, error) {
-	return impl.readF(impl.peer.Reader())
+	return impl.readF(impl.peer)
 }
 
 func (impl *reconnectingImpl) tx(m *Message) error {
@@ -148,7 +148,7 @@ func (impl *reconnectingImpl) tx(m *Message) error {
 		return err
 	}
 
-	_, err = impl.peer.Writer().Write(data)
+	_, err = impl.peer.Write(data)
 	if err != nil {
 		return err
 	}
@@ -198,11 +198,11 @@ func (impl *reconnectingImpl) Reconnect() error {
 }
 
 func (impl *reconnectingImpl) SetWriteTimeout(duration time.Duration) error {
-	return impl.peer.SetWriteTimeout(duration)
+	return impl.peer.SetWriteDeadline(time.Now().Add(duration))
 }
 
 type reconnectingImpl struct {
-	peer                transport.Connection
+	peer                transport.Conn
 	id                  *identity.TokenId
 	connectionId        string
 	headers             map[int32][]byte

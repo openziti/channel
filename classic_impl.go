@@ -21,13 +21,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/transport"
+	"github.com/openziti/transport/v2"
 	"sync"
 	"time"
 )
 
 type classicImpl struct {
-	peer         transport.Connection
+	peer         transport.Conn
 	id           *identity.TokenId
 	connectionId string
 	headers      map[int32][]byte
@@ -38,11 +38,11 @@ type classicImpl struct {
 }
 
 func (impl *classicImpl) SetWriteTimeout(duration time.Duration) error {
-	return impl.peer.SetWriteTimeout(duration)
+	return impl.peer.SetWriteDeadline(time.Now().Add(duration))
 }
 
 func (impl *classicImpl) rxHello() (*Message, error) {
-	msg, readF, marshallF, err := readHello(impl.peer.Reader())
+	msg, readF, marshallF, err := readHello(impl.peer)
 	impl.readF = readF
 	impl.marshalF = marshallF
 	return msg, err
@@ -52,7 +52,7 @@ func (impl *classicImpl) Rx() (*Message, error) {
 	if impl.closed {
 		return nil, errors.New("underlay closed")
 	}
-	return impl.readF(impl.peer.Reader())
+	return impl.readF(impl.peer)
 }
 
 func (impl *classicImpl) Tx(m *Message) error {
@@ -65,7 +65,7 @@ func (impl *classicImpl) Tx(m *Message) error {
 		return err
 	}
 
-	_, err = impl.peer.Writer().Write(data)
+	_, err = impl.peer.Write(data)
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func (impl *classicImpl) IsClosed() bool {
 	return impl.closed
 }
 
-func newClassicImpl(peer transport.Connection, version uint32) *classicImpl {
+func newClassicImpl(peer transport.Conn, version uint32) *classicImpl {
 	readF := ReadV2
 	marshalF := MarshalV2
 

@@ -1,3 +1,5 @@
+//go:build prototype
+
 /*
 	Copyright NetFoundry, Inc.
 
@@ -14,37 +16,44 @@
 	limitations under the License.
 */
 
-package channel
+package datagram
 
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
-	"net"
 	"time"
 )
 
-type existingConnListener struct {
+type listener struct {
 	identity *identity.TokenId
-	peer     net.Conn
+	peer     transport.Conn
 	headers  map[int32][]byte
 }
 
-func NewExistingConnListener(identity *identity.TokenId, peer net.Conn, headers map[int32][]byte) UnderlayFactory {
-	return &existingConnListener{
+func NewListener(identity *identity.TokenId, peer transport.Conn, headers map[int32][]byte) channel.UnderlayFactory {
+	return &listener{
 		identity: identity,
 		peer:     peer,
 		headers:  headers,
 	}
 }
 
-func (self *existingConnListener) Create(timeout time.Duration, _ transport.Configuration) (Underlay, error) {
+// TODO: need to restructure so we start after receiving hello and responding, but can also
+//       respond to additional hellos after we're up and running, since initial response
+//       may have gotten lost. Could add hello receive handler here
+func (self *listener) Create(timeout time.Duration, _ transport.Configuration) (channel.Underlay, error) {
 	log := pfxlog.Logger()
 
-	impl := newExistingImpl(self.peer, 2)
-	connectionId, err := NextConnectionId()
+	impl := &Underlay{
+		id:   self.identity,
+		peer: self.peer,
+	}
+
+	connectionId, err := channel.NextConnectionId()
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting connection id")
 	}
@@ -77,36 +86,36 @@ func (self *existingConnListener) Create(timeout time.Duration, _ transport.Conf
 	return impl, nil
 }
 
-func (self *existingConnListener) receiveHello(impl *existingConnImpl) (*Message, *Hello, error) {
+func (self *listener) receiveHello(impl *Underlay) (*channel.Message, *channel.Hello, error) {
 	log := pfxlog.ContextLogger(impl.Label())
 	log.Debug("started")
 	defer log.Debug("exited")
 
-	request, err := impl.rxHello()
+	request, err := impl.Rx()
 	if err != nil {
-		if err == UnknownVersionError {
-			WriteUnknownVersionResponse(impl.peer)
+		if err == channel.UnknownVersionError {
+			channel.WriteUnknownVersionResponse(impl.peer)
 		}
 		_ = impl.Close()
 		return nil, nil, fmt.Errorf("receive error (%s)", err)
 	}
-	if request.ContentType != ContentTypeHelloType {
+	if request.ContentType != channel.ContentTypeHelloType {
 		_ = impl.Close()
 		return nil, nil, fmt.Errorf("unexpected content type [%d]", request.ContentType)
 	}
-	hello := UnmarshalHello(request)
+	hello := channel.UnmarshalHello(request)
 	return request, hello, nil
 }
 
-func (self *existingConnListener) ackHello(impl *existingConnImpl, request *Message, success bool, message string) error {
-	response := NewResult(success, message)
+func (self *listener) ackHello(impl *Underlay, request *channel.Message, success bool, message string) error {
+	response := channel.NewResult(success, message)
 
 	for key, val := range self.headers {
 		response.Headers[key] = val
 	}
 
-	response.Headers[ConnectionIdHeader] = []byte(impl.connectionId)
-	response.sequence = HelloSequence
+	response.Headers[channel.ConnectionIdHeader] = []byte(impl.connectionId)
+	response.SetSequence(channel.HelloSequence)
 
 	response.ReplyTo(request)
 	return impl.Tx(response)

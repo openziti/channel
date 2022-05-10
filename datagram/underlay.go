@@ -1,3 +1,5 @@
+//go:build prototype
+
 /*
 	Copyright NetFoundry, Inc.
 
@@ -14,51 +16,45 @@
 	limitations under the License.
 */
 
-package websockets
+package datagram
 
 import (
 	"bytes"
 	"crypto/x509"
-	"github.com/gorilla/websocket"
+	"fmt"
 	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/foundation/util/concurrenz"
 	"github.com/openziti/transport/v2"
-	"github.com/pkg/errors"
 	"time"
 )
 
 type Underlay struct {
-	id     *identity.TokenId
-	peer   *websocket.Conn
-	closed concurrenz.AtomicBoolean
-	certs  []*x509.Certificate
+	id           *identity.TokenId
+	connectionId string
+	headers      map[int32][]byte
+	peer         transport.Conn
+	closed       concurrenz.AtomicBoolean
 }
 
-func NewUnderlayFactory(id *identity.TokenId, peer *websocket.Conn, certs []*x509.Certificate) channel.UnderlayFactory {
+func NewUnderlay(id *identity.TokenId, peer transport.Conn) channel.Underlay {
 	return &Underlay{
-		id:    id,
-		peer:  peer,
-		certs: certs,
+		id:   id,
+		peer: peer,
 	}
 }
 
-func (self *Underlay) Create(time.Duration, transport.Configuration) (channel.Underlay, error) {
-	return self, nil
-}
-
 func (self *Underlay) Rx() (*channel.Message, error) {
-	t, data, err := self.peer.ReadMessage()
+	buf := make([]byte, 65000)
+	n, err := self.peer.Read(buf)
 	if err != nil {
 		return nil, err
 	}
 
-	if t != websocket.BinaryMessage {
-		return nil, errors.Errorf("expected binary message type, got %v", t)
-	}
+	buf = buf[:n]
 
-	buf := bytes.NewBuffer(data)
-	return channel.ReadV2(buf)
+	reader := bytes.NewBuffer(buf)
+	return channel.ReadV2(reader)
 }
 
 func (self *Underlay) Tx(m *channel.Message) error {
@@ -66,7 +62,8 @@ func (self *Underlay) Tx(m *channel.Message) error {
 	if err != nil {
 		return err
 	}
-	return self.peer.WriteMessage(websocket.BinaryMessage, data)
+	_, err = self.peer.Write(data)
+	return err
 }
 
 func (self *Underlay) Id() *identity.TokenId {
@@ -74,19 +71,19 @@ func (self *Underlay) Id() *identity.TokenId {
 }
 
 func (self *Underlay) LogicalName() string {
-	return "ws"
+	return "datagram"
 }
 
 func (self *Underlay) ConnectionId() string {
-	return self.id.Token
+	return self.connectionId
 }
 
 func (self *Underlay) Certificates() []*x509.Certificate {
-	return self.certs
+	return self.peer.PeerCertificates()
 }
 
 func (self *Underlay) Label() string {
-	return "ws"
+	return fmt.Sprintf("u{%s}->i{%s}", self.LogicalName(), self.ConnectionId())
 }
 
 func (self *Underlay) Close() error {
@@ -101,7 +98,7 @@ func (self *Underlay) IsClosed() bool {
 }
 
 func (self *Underlay) Headers() map[int32][]byte {
-	return nil
+	return self.headers
 }
 
 func (self *Underlay) SetWriteTimeout(duration time.Duration) error {
