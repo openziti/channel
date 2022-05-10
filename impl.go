@@ -25,7 +25,7 @@ import (
 	"github.com/openziti/foundation/util/concurrenz"
 	"github.com/openziti/foundation/util/info"
 	"github.com/openziti/foundation/util/sequence"
-	"github.com/openziti/transport"
+	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"
 	"net"

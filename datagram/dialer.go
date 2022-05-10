@@ -1,3 +1,5 @@
+//go:build prototype
+
 /*
 	Copyright NetFoundry, Inc.
 
@@ -14,39 +16,42 @@
 	limitations under the License.
 */
 
-package channel
+package datagram
 
 import (
 	"errors"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/identity"
 	"github.com/openziti/transport/v2"
-	"net"
 	"time"
 )
 
-type existingConnDialer struct {
+type dialer struct {
 	id      *identity.TokenId
-	peer    net.Conn
+	peer    transport.Conn
 	headers map[int32][]byte
 }
 
-func NewExistingConnDialer(id *identity.TokenId, peer net.Conn, headers map[int32][]byte) UnderlayFactory {
-	return &existingConnDialer{
+func NewDatagramDialer(id *identity.TokenId, peer transport.Conn, headers map[int32][]byte) channel.UnderlayFactory {
+	return &dialer{
 		id:      id,
 		peer:    peer,
 		headers: headers,
 	}
 }
 
-func (self *existingConnDialer) Create(timeout time.Duration, _ transport.Configuration) (Underlay, error) {
+func (self *dialer) Create(timeout time.Duration, _ transport.Configuration) (channel.Underlay, error) {
 	log := pfxlog.Logger()
 	log.Debug("started")
 	defer log.Debug("exited")
 
+	if timeout < 10*time.Millisecond {
+		return nil, errors.New("timeout must be at least 10ms")
+	}
+
 	version := uint32(2)
-	tryCount := 0
 
 	defer func() {
 		if err := self.peer.SetDeadline(time.Time{}); err != nil { // clear write deadline
@@ -54,25 +59,17 @@ func (self *existingConnDialer) Create(timeout time.Duration, _ transport.Config
 		}
 	}()
 
-	for {
-		impl := newExistingImpl(self.peer, version)
+	impl := &Underlay{
+		id:   self.id,
+		peer: self.peer,
+	}
 
-		if timeout > 0 {
-			if err := self.peer.SetDeadline(time.Now().Add(timeout)); err != nil {
-				return nil, err
-			}
-		}
+	deadline := time.Now().Add(timeout)
+
+	for deadline.After(time.Now()) {
 		if err := self.sendHello(impl); err != nil {
-			if tryCount > 0 {
-				return nil, err
-			} else {
-				log.WithError(err).Warnf("error initiating channel with hello")
-			}
-			tryCount++
-			if retryVersion, _ := GetRetryVersion(err); retryVersion != version {
+			if retryVersion, _ := channel.GetRetryVersion(err); retryVersion != version {
 				version = retryVersion
-			} else {
-				return nil, err
 			}
 
 			log.Warnf("Retrying dial with protocol version %v", version)
@@ -81,32 +78,44 @@ func (self *existingConnDialer) Create(timeout time.Duration, _ transport.Config
 		impl.id = self.id
 		return impl, nil
 	}
+
+	return nil, errors.New("connect timeout")
 }
 
-func (self *existingConnDialer) sendHello(impl *existingConnImpl) error {
+func (self *dialer) sendHello(impl *Underlay) error {
 	log := pfxlog.ContextLogger(impl.Label())
 	defer log.Debug("exited")
 	log.Debug("started")
 
-	request := NewHello(self.id.Token, self.headers)
-	request.sequence = HelloSequence
+	request := channel.NewHello(self.id.Token, self.headers)
+	request.SetSequence(channel.HelloSequence)
 	if err := impl.Tx(request); err != nil {
 		_ = impl.peer.Close()
 		return err
 	}
 
+	if err := impl.peer.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		return err
+	}
+
+	defer func() {
+		if err := self.peer.SetReadDeadline(time.Time{}); err != nil { // clear write deadline
+			log.WithError(err).Error("unable to clear read deadline")
+		}
+	}()
+
 	response, err := impl.Rx()
 	if err != nil {
 		return err
 	}
-	if !response.IsReplyingTo(request.sequence) || response.ContentType != ContentTypeResultType {
-		return fmt.Errorf("channel synchronization error, expected %v, got %v", request.sequence, response.ReplyFor())
+	if !response.IsReplyingTo(channel.HelloSequence) || response.ContentType != channel.ContentTypeResultType {
+		return fmt.Errorf("channel synchronization error, expected %v, got %v", channel.HelloSequence, response.ReplyFor())
 	}
-	result := UnmarshalResult(response)
+	result := channel.UnmarshalResult(response)
 	if !result.Success {
 		return errors.New(result.Message)
 	}
-	impl.connectionId = string(response.Headers[ConnectionIdHeader])
+	impl.connectionId = string(response.Headers[channel.ConnectionIdHeader])
 	impl.headers = response.Headers
 
 	return nil

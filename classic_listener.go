@@ -20,8 +20,10 @@ import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/transport"
 	"github.com/openziti/foundation/util/concurrenz"
+	"github.com/openziti/foundation/util/goroutines"
+	"github.com/openziti/transport/v2"
+	"github.com/sirupsen/logrus"
 	"io"
 	"time"
 )
@@ -37,6 +39,7 @@ type classicListener struct {
 	tcfg           transport.Configuration
 	headers        map[int32][]byte
 	closed         concurrenz.AtomicBoolean
+	listenerPool   goroutines.Pool
 }
 
 func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, connectOptions ConnectOptions, headers map[int32][]byte) UnderlayListener {
@@ -44,30 +47,47 @@ func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 }
 
 func NewClassicListenerWithTransportConfiguration(identity *identity.TokenId, endpoint transport.Address, connectOptions ConnectOptions, tcfg transport.Configuration, headers map[int32][]byte) UnderlayListener {
+	closeNotify := make(chan struct{})
+
+	poolConfig := goroutines.PoolConfig{
+		QueueSize:   uint32(connectOptions.MaxQueuedConnects),
+		MinWorkers:  1,
+		MaxWorkers:  uint32(connectOptions.MaxOutstandingConnects),
+		IdleTime:    10 * time.Second,
+		CloseNotify: closeNotify,
+		PanicHandler: func(err interface{}) {
+			pfxlog.Logger().
+				WithField("id", identity.Token).
+				WithField("endpoint", endpoint.String()).
+				WithField(logrus.ErrorKey, err).Error("panic during channel accept")
+		},
+	}
+
+	pool, err := goroutines.NewPool(poolConfig)
+	if err != nil {
+		logrus.WithError(err).Error("failed to initial channel listener pool")
+		panic(err)
+	}
+
 	return &classicListener{
 		identity:       identity,
 		endpoint:       endpoint,
-		close:          make(chan struct{}),
+		close:          closeNotify,
 		created:        make(chan Underlay),
 		connectOptions: connectOptions,
 		tcfg:           tcfg,
 		headers:        headers,
+		listenerPool:   pool,
 	}
 }
 
 func (listener *classicListener) Listen(handlers ...ConnectionHandler) error {
-	incoming := make(chan transport.Connection, listener.connectOptions.MaxQueuedConnects)
-	socket, err := listener.endpoint.Listen("classic", listener.identity, incoming, listener.tcfg)
+	listener.handlers = handlers
+	socket, err := listener.endpoint.Listen("classic", listener.identity, listener.acceptConnection, listener.tcfg)
 	if err != nil {
 		return err
 	}
 	listener.socket = socket
-	listener.handlers = handlers
-
-	for i := 0; i < listener.connectOptions.MaxOutstandingConnects; i++ {
-		go listener.listener(incoming)
-	}
-
 	return nil
 }
 
@@ -99,71 +119,66 @@ func (listener *classicListener) Create(_ time.Duration, tcfg transport.Configur
 	return nil, ListenerClosedError
 }
 
-func (listener *classicListener) listener(incoming chan transport.Connection) {
+func (listener *classicListener) acceptConnection(peer transport.Conn) {
 	log := pfxlog.ContextLogger(listener.endpoint.String())
-	log.Debug("started")
-	defer log.Debug("exited")
+	err := listener.listenerPool.Queue(func() {
+		impl := newClassicImpl(peer, 2)
 
-	for {
-		select {
-		case peer := <-incoming:
-			impl := newClassicImpl(peer, 2)
-			if connectionId, err := NextConnectionId(); err == nil {
-				impl.connectionId = connectionId
-
-				if err := peer.SetReadTimeout(listener.connectOptions.ConnectTimeout); err != nil {
-					log.Errorf("could not set read timeout for [%s] (%v)", peer.Detail().Address, err)
-					_ = peer.Close()
-					continue
-				}
-
-				request, hello, err := listener.receiveHello(impl)
-
-				if err == nil {
-					if err = peer.ClearReadTimeout(); err != nil {
-						log.Errorf("could not clear read timeout for [%s] (%v)", peer.Detail().Address, err)
-						_ = peer.Close()
-						continue
-					}
-
-					for _, h := range listener.handlers {
-						if err = h.HandleConnection(hello, peer.PeerCertificates()); err != nil {
-							break
-						}
-					}
-
-					if err != nil {
-						log.Errorf("connection handler error for [%s] (%v)", peer.Detail().Address, err)
-						_ = peer.Close()
-						continue
-					}
-
-					impl.id = &identity.TokenId{Token: hello.IdToken}
-					impl.headers = hello.Headers
-
-					if err := listener.ackHello(impl, request, true, ""); err == nil {
-						select {
-						case listener.created <- impl:
-						case <-listener.close:
-							log.Infof("channel closed, can't notify of new connection [%s] (%v)", peer.Detail().Address, err)
-							return
-						}
-					} else {
-						log.Errorf("error acknowledging hello for [%s] (%v)", peer.Detail().Address, err)
-					}
-
-				} else {
-					_ = peer.Close()
-					log.Errorf("error receiving hello from [%s] (%v)", peer.Detail().Address, err)
-				}
-			} else {
-				_ = peer.Close()
-				log.Errorf("error getting connection id for [%s] (%v)", peer.Detail().Address, err)
-			}
-
-		case <-listener.close:
+		var err error
+		impl.connectionId, err = NextConnectionId()
+		if err != nil {
+			_ = peer.Close()
+			log.Errorf("error getting connection id for [%s] (%v)", peer.Detail().Address, err)
 			return
 		}
+
+		if err = peer.SetReadDeadline(time.Now().Add(listener.connectOptions.ConnectTimeout)); err != nil {
+			log.Errorf("could not set read timeout for [%s] (%v)", peer.Detail().Address, err)
+			_ = peer.Close()
+			return
+		}
+
+		request, hello, err := listener.receiveHello(impl)
+		if err != nil {
+			_ = peer.Close()
+			log.Errorf("error receiving hello from [%s] (%v)", peer.Detail().Address, err)
+			return
+		}
+
+		if err = peer.SetReadDeadline(time.Time{}); err != nil {
+			log.Errorf("could not clear read timeout for [%s] (%v)", peer.Detail().Address, err)
+			_ = peer.Close()
+			return
+		}
+
+		for _, h := range listener.handlers {
+			if err = h.HandleConnection(hello, peer.PeerCertificates()); err != nil {
+				break
+			}
+		}
+
+		if err != nil {
+			log.Errorf("connection handler error for [%s] (%v)", peer.Detail().Address, err)
+			_ = peer.Close()
+			return
+		}
+
+		impl.id = &identity.TokenId{Token: hello.IdToken}
+		impl.headers = hello.Headers
+
+		if err := listener.ackHello(impl, request, true, ""); err == nil {
+			select {
+			case listener.created <- impl:
+			case <-listener.close:
+				log.Infof("channel closed, can't notify of new connection [%s] (%v)", peer.Detail().Address, err)
+				return
+			}
+		} else {
+			log.Errorf("error acknowledging hello for [%s] (%v)", peer.Detail().Address, err)
+		}
+	})
+	if err != nil {
+		log.WithError(err).Error("failed to queue connection accept")
 	}
 }
 
@@ -175,7 +190,7 @@ func (listener *classicListener) receiveHello(impl *classicImpl) (*Message, *Hel
 	request, err := impl.rxHello()
 	if err != nil {
 		if err == UnknownVersionError {
-			writeUnknownVersionResponse(impl.peer.Writer())
+			WriteUnknownVersionResponse(impl.peer)
 		}
 		_ = impl.Close()
 		return nil, nil, fmt.Errorf("receive error (%s)", err)

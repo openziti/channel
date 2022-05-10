@@ -1,6 +1,6 @@
 module github.com/openziti/channel
 
-go 1.17
+go 1.18
 
 // replace github.com/michaelquigley/pfxlog => ../pfxlog
 
@@ -26,6 +26,7 @@ require (
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/miekg/pkcs11 v1.1.1 // indirect
 	github.com/openziti/dilithium v0.3.3 // indirect
+	github.com/openziti/transport/v2 v2.0.0 // indirect
 	github.com/parallaxsecond/parsec-client-go v0.0.0-20220111122524-cb78842db373 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/speps/go-hashids v2.0.0+incompatible // indirect

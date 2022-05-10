@@ -19,11 +19,11 @@ package main
 import (
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/channel/cmd/channel/subcmd"
-	"github.com/openziti/transport"
-	"github.com/openziti/transport/tcp"
-	"github.com/openziti/transport/tls"
-	"github.com/openziti/transport/transwarp"
-	"github.com/openziti/transport/wss"
+	"github.com/openziti/transport/v2"
+	"github.com/openziti/transport/v2/tcp"
+	"github.com/openziti/transport/v2/tls"
+	"github.com/openziti/transport/v2/transwarp"
+	"github.com/openziti/transport/v2/wss"
 	"github.com/sirupsen/logrus"
 )
 

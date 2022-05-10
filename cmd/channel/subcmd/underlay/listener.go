@@ -21,7 +21,7 @@ import (
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/channel"
 	"github.com/openziti/foundation/identity/dotziti"
-	"github.com/openziti/transport"
+	"github.com/openziti/transport/v2"
 	"github.com/spf13/cobra"
 	"time"
 )
