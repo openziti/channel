@@ -7,8 +7,8 @@ go 1.18
 require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/michaelquigley/pfxlog v0.6.9
-	github.com/openziti/foundation v0.17.22
-	github.com/openziti/transport v0.1.5
+	github.com/openziti/foundation v0.17.23
+	github.com/openziti/transport/v2 v2.0.0
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/cobra v1.4.0
@@ -18,7 +18,7 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/emirpasic/gods v1.12.0 // indirect
+	github.com/emirpasic/gods v1.17.0 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
@@ -26,7 +26,6 @@ require (
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/miekg/pkcs11 v1.1.1 // indirect
 	github.com/openziti/dilithium v0.3.3 // indirect
-	github.com/openziti/transport/v2 v2.0.0 // indirect
 	github.com/parallaxsecond/parsec-client-go v0.0.0-20220111122524-cb78842db373 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/speps/go-hashids v2.0.0+incompatible // indirect
