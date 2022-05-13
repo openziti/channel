@@ -60,7 +60,7 @@ func runListener(_ *cobra.Command, _ []string) {
 	var listener channel.UnderlayListener
 	switch listenerUnderlay {
 	case "classic":
-		listener = channel.NewClassicListener(id, endpoint, channel.DefaultConnectOptions(), nil)
+		listener = channel.NewClassicListener(id, endpoint, channel.DefaultListenerConfig())
 	case "reconnecting":
 		panic("not implemented")
 	default:

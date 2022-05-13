@@ -42,19 +42,27 @@ type classicListener struct {
 	listenerPool   goroutines.Pool
 }
 
-func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, connectOptions ConnectOptions, headers map[int32][]byte) UnderlayListener {
-	return NewClassicListenerWithTransportConfiguration(identity, endpoint, connectOptions, nil, headers)
+func DefaultListenerConfig() ListenerConfig {
+	return ListenerConfig{
+		ConnectOptions: DefaultConnectOptions(),
+	}
 }
 
-func NewClassicListenerWithTransportConfiguration(identity *identity.TokenId, endpoint transport.Address, connectOptions ConnectOptions, tcfg transport.Configuration, headers map[int32][]byte) UnderlayListener {
+type ListenerConfig struct {
+	ConnectOptions
+	Headers          map[int32][]byte
+	TransportConfig  transport.Configuration
+	PoolConfigurator func(config *goroutines.PoolConfig)
+}
+
+func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig) UnderlayListener {
 	closeNotify := make(chan struct{})
 
 	poolConfig := goroutines.PoolConfig{
-		QueueSize:   uint32(connectOptions.MaxQueuedConnects),
-		MinWorkers:  1,
-		MaxWorkers:  uint32(connectOptions.MaxOutstandingConnects),
-		IdleTime:    10 * time.Second,
-		CloseNotify: closeNotify,
+		QueueSize:  uint32(config.ConnectOptions.MaxQueuedConnects),
+		MinWorkers: 1,
+		MaxWorkers: uint32(config.ConnectOptions.MaxOutstandingConnects),
+		IdleTime:   10 * time.Second,
 		PanicHandler: func(err interface{}) {
 			pfxlog.Logger().
 				WithField("id", identity.Token).
@@ -62,6 +70,12 @@ func NewClassicListenerWithTransportConfiguration(identity *identity.TokenId, en
 				WithField(logrus.ErrorKey, err).Error("panic during channel accept")
 		},
 	}
+
+	if config.PoolConfigurator != nil {
+		config.PoolConfigurator(&poolConfig)
+	}
+
+	poolConfig.CloseNotify = closeNotify
 
 	pool, err := goroutines.NewPool(poolConfig)
 	if err != nil {
@@ -74,9 +88,9 @@ func NewClassicListenerWithTransportConfiguration(identity *identity.TokenId, en
 		endpoint:       endpoint,
 		close:          closeNotify,
 		created:        make(chan Underlay),
-		connectOptions: connectOptions,
-		tcfg:           tcfg,
-		headers:        headers,
+		connectOptions: config.ConnectOptions,
+		tcfg:           config.TransportConfig,
+		headers:        config.Headers,
 		listenerPool:   pool,
 	}
 }
