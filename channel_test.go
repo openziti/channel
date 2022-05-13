@@ -3,9 +3,9 @@ package channel
 import (
 	"fmt"
 	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/transport/v2/tcp"
 	"github.com/openziti/foundation/util/concurrenz"
 	"github.com/openziti/foundation/util/netz"
+	"github.com/openziti/transport/v2/tcp"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
@@ -379,7 +379,7 @@ func (self *testServer) start(t *testing.T) {
 	id := &identity.TokenId{Token: "test-server"}
 	addr, err := tcp.AddressParser{}.Parse(testAddress)
 	require.NoError(t, err)
-	self.listener = NewClassicListener(id, addr, DefaultConnectOptions(), nil)
+	self.listener = NewClassicListener(id, addr, DefaultListenerConfig())
 	require.NoError(t, self.listener.Listen())
 	require.NoError(t, netz.WaitForPortActive("localhost:28433", time.Second*2))
 
