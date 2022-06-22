@@ -7,11 +7,11 @@ go 1.18
 require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/michaelquigley/pfxlog v0.6.9
-	github.com/openziti/foundation v0.17.29
-	github.com/openziti/transport/v2 v2.0.6
+	github.com/openziti/foundation v0.17.30
+	github.com/openziti/transport/v2 v2.0.7
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.8.1
-	github.com/spf13/cobra v1.4.0
+	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.7.4
 	google.golang.org/protobuf v1.28.0
 )
