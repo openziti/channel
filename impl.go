@@ -1,5 +1,5 @@
 /*
-	Copyright NetFoundry, Inc.
+	Copyright NetFoundry Inc.
 
 	Licensed under the Apache License, Version 2.0 (the "License");
 	you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ import (
 	"crypto/x509"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/foundation/util/concurrenz"
-	"github.com/openziti/foundation/util/info"
-	"github.com/openziti/foundation/util/sequence"
+	"github.com/openziti/identity"
+	"github.com/openziti/foundation/v2/concurrenz"
+	"github.com/openziti/foundation/v2/info"
+	"github.com/openziti/foundation/v2/sequence"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"

@@ -1,5 +1,5 @@
 /*
-	Copyright NetFoundry, Inc.
+	Copyright NetFoundry Inc.
 
 	Licensed under the Apache License, Version 2.0 (the "License");
 	you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import (
 	"github.com/openziti/channel"
 	"github.com/openziti/channel/cmd/channel/subcmd"
 	"github.com/openziti/channel/memory"
-	"github.com/openziti/foundation/identity/dotziti"
-	"github.com/openziti/foundation/identity/identity"
+	"github.com/openziti/identity/dotziti"
+	"github.com/openziti/identity"
 	"github.com/spf13/cobra"
 	"time"
 )

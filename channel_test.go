@@ -2,9 +2,9 @@ package channel
 
 import (
 	"fmt"
-	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/foundation/util/concurrenz"
-	"github.com/openziti/foundation/util/netz"
+	"github.com/openziti/identity"
+	"github.com/openziti/foundation/v2/concurrenz"
+	"github.com/openziti/foundation/v2/netz"
 	"github.com/openziti/transport/v2/tcp"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
