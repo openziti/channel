@@ -8,7 +8,7 @@ require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/michaelquigley/pfxlog v0.6.9
 	github.com/openziti/foundation v0.17.31
-	github.com/openziti/transport/v2 v2.0.9
+	github.com/openziti/transport/v2 v2.0.10
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/cobra v1.5.0
@@ -18,7 +18,7 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/emirpasic/gods v1.17.0 // indirect
+	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect

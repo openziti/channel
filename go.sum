@@ -90,8 +90,8 @@ github.com/dgrijalva/jwt-go v3.2.0+incompatible/go.mod h1:E3ru+11k8xSBh+hMPgOLZm
 github.com/dgryski/go-sip13 v0.0.0-20181026042036-e10d5fee7954/go.mod h1:vAd38F8PWV+bWy6jNmig1y/TA+kYO4g3RSRF0IAv0no=
 github.com/dustin/go-humanize v1.0.0/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
 github.com/emirpasic/gods v1.12.0/go.mod h1:YfzfFFoVP/catgzJb4IKIqXjX78Ha8FMSDh3ymbK86o=
-github.com/emirpasic/gods v1.17.0 h1:qOswSAaPBdCkBIAXmvwe0V9mv4UtNQHN3zxRHmw3sKQ=
-github.com/emirpasic/gods v1.17.0/go.mod h1:8tpGGwCnJ5H4r6BWwaV6OrWmMoPhUl5jm/FMNAnJvWQ=
+github.com/emirpasic/gods v1.18.1 h1:FXtiHYKDGKCW2KzwZKx0iC0PQmdlorYgdFG9jPXJ1Bc=
+github.com/emirpasic/gods v1.18.1/go.mod h1:8tpGGwCnJ5H4r6BWwaV6OrWmMoPhUl5jm/FMNAnJvWQ=
 github.com/envoyproxy/go-control-plane v0.9.0/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.mod h1:YTl/9mNaCwkRvm6d1a2C3ymFceY/DCBVvsKhRF0iEA4=
 github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1mIlRU8Am5FuJP05cCM98=
@@ -324,8 +324,8 @@ github.com/openziti/dilithium v0.3.3 h1:PLgQ6PMNLSTzCFbX/h98cmudgz/cU6TmjdSv5NAP
 github.com/openziti/dilithium v0.3.3/go.mod h1:vsCjI2AU/hon9e+dLhUFbCNGesJDj2ASgkySOcpmvjo=
 github.com/openziti/foundation v0.17.31 h1:rLuoBhH/YKy7HTKDTiBzEIXffZq7nr+waJvepdwBWNE=
 github.com/openziti/foundation v0.17.31/go.mod h1:yOn4gl8cAv5r98fd3pvQFj57hrG4V9R8r4AAgYes/Lw=
-github.com/openziti/transport/v2 v2.0.9 h1:RZHBuaFAO6fxsomegvDTqBnlOXvzASanvfh8awcFmT0=
-github.com/openziti/transport/v2 v2.0.9/go.mod h1:+Lo/SPmXAY6toSm4l5GBQYTWFbEs6INZXFQgk6HTQ8g=
+github.com/openziti/transport/v2 v2.0.10 h1:x9FmccmF+f1hhplBzbVH5IIOVznIiBzxUzvB5xNWMm4=
+github.com/openziti/transport/v2 v2.0.10/go.mod h1:5Y6lrnyhJGekQ3tWGNs1Sl8zMee8vL4UY2AEbaMjv54=
 github.com/parallaxsecond/parsec-client-go v0.0.0-20220111122524-cb78842db373 h1:CUvH4JL/8OVy023LMER3dB/MerNQ6OIz4QV3E/JQ3UY=
 github.com/parallaxsecond/parsec-client-go v0.0.0-20220111122524-cb78842db373/go.mod h1:gLH27qo/dvMhLTVVyMELpe3Tut7sOfkiDg7ZpeqKwsw=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
