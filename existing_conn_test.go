@@ -3,7 +3,7 @@ package channel
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/identity/identity"
+	"github.com/openziti/identity"
 	"github.com/stretchr/testify/require"
 	"net"
 	"testing"

@@ -4,7 +4,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/openziti/foundation/identity/identity"
+	"github.com/openziti/identity"
 	"net"
 	"sync"
 	"time"

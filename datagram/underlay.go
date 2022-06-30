@@ -1,7 +1,7 @@
 //go:build prototype
 
 /*
-	Copyright NetFoundry, Inc.
+	Copyright NetFoundry Inc.
 
 	Licensed under the Apache License, Version 2.0 (the "License");
 	you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ import (
 	"crypto/x509"
 	"fmt"
 	"github.com/openziti/channel"
-	"github.com/openziti/foundation/identity/identity"
-	"github.com/openziti/foundation/util/concurrenz"
+	"github.com/openziti/identity"
+	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/transport/v2"
 	"time"
 )
