@@ -20,9 +20,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/openziti/identity"
 	"github.com/openziti/foundation/v2/concurrenz"
+	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
+	"net"
 	"time"
 )
 
@@ -34,6 +35,14 @@ type classicImpl struct {
 	closed       concurrenz.AtomicBoolean
 	readF        readFunction
 	marshalF     marshalFunction
+}
+
+func (impl *classicImpl) GetLocalAddr() net.Addr {
+	return impl.peer.LocalAddr()
+}
+
+func (impl *classicImpl) GetRemoteAddr() net.Addr {
+	return impl.peer.RemoteAddr()
 }
 
 func (impl *classicImpl) SetWriteTimeout(duration time.Duration) error {

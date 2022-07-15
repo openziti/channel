@@ -23,6 +23,7 @@ import (
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"
+	"net"
 	"time"
 )
 
@@ -166,6 +167,8 @@ type Underlay interface {
 	IsClosed() bool
 	Headers() map[int32][]byte
 	SetWriteTimeout(duration time.Duration) error
+	GetLocalAddr() net.Addr
+	GetRemoteAddr() net.Addr
 }
 
 const AnyContentType = -1
