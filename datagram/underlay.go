@@ -23,8 +23,8 @@ import (
 	"crypto/x509"
 	"fmt"
 	"github.com/openziti/channel"
-	"github.com/openziti/identity"
 	"github.com/openziti/foundation/v2/concurrenz"
+	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"time"
 )
@@ -42,6 +42,14 @@ func NewUnderlay(id *identity.TokenId, peer transport.Conn) channel.Underlay {
 		id:   id,
 		peer: peer,
 	}
+}
+
+func (impl *Underlay) GetLocalAddr() net.Addr {
+	return impl.peer.LocalAddr()
+}
+
+func (impl *Underlay) GetRemoteAddr() net.Addr {
+	return impl.peer.RemoteAddr()
 }
 
 func (self *Underlay) Rx() (*channel.Message, error) {

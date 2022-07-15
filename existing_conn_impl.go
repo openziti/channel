@@ -21,6 +21,14 @@ type existingConnImpl struct {
 	marshalF     marshalFunction
 }
 
+func (impl *existingConnImpl) GetLocalAddr() net.Addr {
+	return impl.peer.LocalAddr()
+}
+
+func (impl *existingConnImpl) GetRemoteAddr() net.Addr {
+	return impl.peer.RemoteAddr()
+}
+
 func (impl *existingConnImpl) SetWriteTimeout(duration time.Duration) error {
 	return impl.peer.SetWriteDeadline(time.Now().Add(duration))
 }

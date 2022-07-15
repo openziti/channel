@@ -24,9 +24,20 @@ import (
 	"github.com/openziti/channel"
 	"github.com/openziti/identity"
 	"io"
+	"net"
 	"sync"
 	"time"
 )
+
+type addr string
+
+func (a addr) Network() string {
+	return "memory"
+}
+
+func (a addr) String() string {
+	return string(a)
+}
 
 type memoryImpl struct {
 	tx           chan *channel.Message
@@ -36,6 +47,14 @@ type memoryImpl struct {
 	headers      map[int32][]byte
 	closeLock    sync.Mutex
 	closed       bool
+}
+
+func (impl *memoryImpl) GetLocalAddr() net.Addr {
+	return addr("local:" + impl.connectionId)
+}
+
+func (impl *memoryImpl) GetRemoteAddr() net.Addr {
+	return addr("remote:" + impl.connectionId)
 }
 
 func (impl *memoryImpl) SetWriteTimeout(time.Duration) error {

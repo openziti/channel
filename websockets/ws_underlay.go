@@ -21,10 +21,11 @@ import (
 	"crypto/x509"
 	"github.com/gorilla/websocket"
 	"github.com/openziti/channel"
-	"github.com/openziti/identity"
 	"github.com/openziti/foundation/v2/concurrenz"
+	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
+	"net"
 	"time"
 )
 
@@ -43,6 +44,13 @@ func NewUnderlayFactory(id *identity.TokenId, peer *websocket.Conn, certs []*x50
 	}
 }
 
+func (impl *Underlay) GetLocalAddr() net.Addr {
+	return impl.peer.LocalAddr()
+}
+
+func (impl *Underlay) GetRemoteAddr() net.Addr {
+	return impl.peer.RemoteAddr()
+}
 func (self *Underlay) Create(time.Duration, transport.Configuration) (channel.Underlay, error) {
 	return self, nil
 }

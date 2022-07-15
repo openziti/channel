@@ -20,11 +20,12 @@ import (
 	"crypto/x509"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/identity"
 	"github.com/openziti/foundation/v2/concurrenz"
+	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"
+	"net"
 	"time"
 )
 
@@ -212,6 +213,14 @@ type reconnectingImpl struct {
 	marshalF            marshalFunction
 	disconnected        concurrenz.AtomicBoolean
 	timeout             time.Duration
+}
+
+func (impl *reconnectingImpl) GetLocalAddr() net.Addr {
+	return impl.peer.LocalAddr()
+}
+
+func (impl *reconnectingImpl) GetRemoteAddr() net.Addr {
+	return impl.peer.RemoteAddr()
 }
 
 type reconnectionHandler interface {
