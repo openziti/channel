@@ -45,6 +45,7 @@ const (
 	HelloVersionHeader              = 4
 	HeartbeatHeader                 = 5
 	HeartbeatResponseHeader         = 6
+	TypeHeader                      = 7
 
 	// Headers in the range 128-255 inclusive will be reflected when creating replies
 	ReflectedHeaderBitMask = 1 << 7

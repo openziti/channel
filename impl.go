@@ -21,10 +21,10 @@ import (
 	"crypto/x509"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/identity"
 	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/foundation/v2/info"
 	"github.com/openziti/foundation/v2/sequence"
+	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"
@@ -69,19 +69,6 @@ func NewChannel(logicalName string, underlayFactory UnderlayFactory, bindHandler
 }
 
 func NewChannelWithTransportConfiguration(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options, tcfg transport.Configuration) (Channel, error) {
-	impl := &channelImpl{
-		logicalName:     logicalName,
-		options:         options,
-		sequence:        sequence.NewSequence(),
-		outQueue:        make(chan Sendable, 4),
-		outPriority:     &priorityHeap{},
-		receiveHandlers: map[int32]ReceiveHandler{},
-		closeNotify:     make(chan struct{}),
-	}
-
-	heap.Init(impl.outPriority)
-	impl.AddTypedReceiveHandler(&pingHandler{})
-
 	timeout := time.Duration(0)
 	if options != nil {
 		timeout = options.ConnectTimeout
@@ -91,9 +78,25 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 	if err != nil {
 		return nil, err
 	}
-	impl.underlay = underlay
+	return NewChannelWithUnderlay(logicalName, underlay, bindHandler, options)
+}
 
-	if err = bind(bindHandler, impl); err != nil {
+func NewChannelWithUnderlay(logicalName string, underlay Underlay, bindHandler BindHandler, options *Options) (Channel, error) {
+	impl := &channelImpl{
+		logicalName:     logicalName,
+		options:         options,
+		sequence:        sequence.NewSequence(),
+		outQueue:        make(chan Sendable, 4),
+		outPriority:     &priorityHeap{},
+		receiveHandlers: map[int32]ReceiveHandler{},
+		closeNotify:     make(chan struct{}),
+		underlay:        underlay,
+	}
+
+	heap.Init(impl.outPriority)
+	impl.AddTypedReceiveHandler(&pingHandler{})
+
+	if err := bind(bindHandler, impl); err != nil {
 		if closeErr := underlay.Close(); closeErr != nil {
 			if !errors.Is(closeErr, net.ErrClosed) {
 				pfxlog.ContextLogger(impl.Label()).WithError(err).Warn("error closing underlay")
@@ -112,32 +115,15 @@ func AcceptNextChannel(logicalName string, underlayFactory UnderlayFactory, bind
 	if err != nil {
 		return err
 	}
-	go acceptAsync(logicalName, underlay, bindHandler, options)
+
+	go func() {
+		_, err = NewChannelWithUnderlay(logicalName, underlay, bindHandler, options)
+		if err != nil {
+			pfxlog.Logger().WithError(err).Errorf("failure accepting channel %v with underlay %v", logicalName, underlay.Label())
+		}
+	}()
+
 	return nil
-}
-
-func acceptAsync(logicalName string, underlay Underlay, bindHandler BindHandler, options *Options) {
-	impl := &channelImpl{
-		underlay:        underlay,
-		logicalName:     logicalName,
-		options:         options,
-		sequence:        sequence.NewSequence(),
-		outQueue:        make(chan Sendable, 4),
-		outPriority:     &priorityHeap{},
-		receiveHandlers: map[int32]ReceiveHandler{},
-		closeNotify:     make(chan struct{}),
-	}
-
-	heap.Init(impl.outPriority)
-	impl.AddTypedReceiveHandler(&pingHandler{})
-
-	//goland:noinspection GoNilness
-	if err := bind(bindHandler, impl); err != nil {
-		pfxlog.Logger().WithError(err).Errorf("failure accepting channel %v with underlay %v", impl.Label(), underlay.Label())
-		return
-	}
-
-	impl.startMultiplex()
 }
 
 func (channel *channelImpl) Id() *identity.TokenId {
