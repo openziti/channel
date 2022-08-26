@@ -82,11 +82,16 @@ func NewChannelWithTransportConfiguration(logicalName string, underlayFactory Un
 }
 
 func NewChannelWithUnderlay(logicalName string, underlay Underlay, bindHandler BindHandler, options *Options) (Channel, error) {
+	outQueueSize := DefaultOutQueueSize
+	if options != nil {
+		outQueueSize = options.OutQueueSize
+	}
+
 	impl := &channelImpl{
 		logicalName:     logicalName,
 		options:         options,
 		sequence:        sequence.NewSequence(),
-		outQueue:        make(chan Sendable, 4),
+		outQueue:        make(chan Sendable, outQueueSize),
 		outPriority:     &priorityHeap{},
 		receiveHandlers: map[int32]ReceiveHandler{},
 		closeNotify:     make(chan struct{}),
@@ -236,14 +241,36 @@ func (channel *channelImpl) Send(s Sendable) error {
 	select {
 	case <-s.Context().Done():
 		if err := s.Context().Err(); err != nil {
-			return TimeoutError{errors.Wrap(err, "timeout waiting for message reply")}
+			return TimeoutError{error: errors.Wrap(err, "timeout waiting for message reply")}
 		}
-		return errors.New("timeout waiting to put message in send queue")
+		return TimeoutError{error: errors.New("timeout waiting to put message in send queue")}
 	case <-channel.closeNotify:
-		return errors.New("channel closed")
+		return ClosedError{}
 	case channel.outQueue <- s:
 	}
 	return nil
+}
+
+func (channel *channelImpl) TrySend(s Sendable) (bool, error) {
+	if err := s.Context().Err(); err != nil {
+		return false, err
+	}
+
+	s.SetSequence(int32(channel.sequence.Next()))
+
+	select {
+	case <-s.Context().Done():
+		if err := s.Context().Err(); err != nil {
+			return false, TimeoutError{errors.Wrap(err, "timeout waiting for message reply")}
+		}
+		return false, TimeoutError{error: errors.New("timeout waiting to put message in send queue")}
+	case <-channel.closeNotify:
+		return false, ClosedError{}
+	case channel.outQueue <- s:
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 func (channel *channelImpl) Underlay() Underlay {
