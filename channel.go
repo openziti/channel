@@ -28,7 +28,6 @@ import (
 )
 
 // Channel represents an asynchronous, message-passing framework, designed to sit on top of an underlay.
-//
 type Channel interface {
 	Identity
 	SetLogicalName(logicalName string)
@@ -41,7 +40,13 @@ type Channel interface {
 }
 
 type Sender interface {
+	// Send will send the given Sendable. If the Sender is busy, it will wait until either the Sender
+	// can process the Sendable, the channel is closed or the associated context.Context times out
 	Send(s Sendable) error
+
+	// TrySend will send the given Sendable. If the Sender is busy (outgoing message queue is full), it will return
+	// immediately rather than wait. The boolean return indicates whether the message was queued or not
+	TrySend(s Sendable) (bool, error)
 }
 
 // Sendable encapsulates all the data and callbacks that a Channel requires when sending a Message.
@@ -143,7 +148,6 @@ type Identity interface {
 }
 
 // UnderlayListener represents a component designed to listen for incoming peer connections.
-//
 type UnderlayListener interface {
 	Listen(handlers ...ConnectionHandler) error
 	UnderlayFactory
@@ -152,13 +156,11 @@ type UnderlayListener interface {
 
 // UnderlayFactory is used by Channel to obtain an Underlay instance. An underlay "dialer" or "listener" implement
 // UnderlayFactory, to provide instances to Channel.
-//
 type UnderlayFactory interface {
 	Create(timeout time.Duration, tcfg transport.Configuration) (Underlay, error)
 }
 
 // Underlay abstracts a physical communications channel, typically sitting on top of 'transport'.
-//
 type Underlay interface {
 	Rx() (*Message, error)
 	Tx(m *Message) error
