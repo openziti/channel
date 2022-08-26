@@ -189,6 +189,12 @@ func IsTimeout(err error) bool {
 	return errors.As(err, &TimeoutError{})
 }
 
+type ClosedError struct{}
+
+func (ClosedError) Error() string {
+	return "channel closed"
+}
+
 var ListenerClosedError = listenerClosedError{}
 
 type listenerClosedError struct{}

@@ -241,11 +241,11 @@ func (channel *channelImpl) Send(s Sendable) error {
 	select {
 	case <-s.Context().Done():
 		if err := s.Context().Err(); err != nil {
-			return TimeoutError{errors.Wrap(err, "timeout waiting for message reply")}
+			return TimeoutError{error: errors.Wrap(err, "timeout waiting for message reply")}
 		}
-		return errors.New("timeout waiting to put message in send queue")
+		return TimeoutError{error: errors.New("timeout waiting to put message in send queue")}
 	case <-channel.closeNotify:
-		return errors.New("channel closed")
+		return ClosedError{}
 	case channel.outQueue <- s:
 	}
 	return nil
@@ -263,9 +263,9 @@ func (channel *channelImpl) TrySend(s Sendable) (bool, error) {
 		if err := s.Context().Err(); err != nil {
 			return false, TimeoutError{errors.Wrap(err, "timeout waiting for message reply")}
 		}
-		return false, errors.New("timeout waiting to put message in send queue")
+		return false, TimeoutError{error: errors.New("timeout waiting to put message in send queue")}
 	case <-channel.closeNotify:
-		return false, errors.New("channel closed")
+		return false, ClosedError{}
 	case channel.outQueue <- s:
 		return true, nil
 	default:
