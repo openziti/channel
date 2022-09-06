@@ -8,8 +8,8 @@ require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/michaelquigley/pfxlog v0.6.9
 	github.com/openziti/foundation/v2 v2.0.3
-	github.com/openziti/identity v1.0.9
-	github.com/openziti/transport/v2 v2.0.26
+	github.com/openziti/identity v1.0.10
+	github.com/openziti/transport/v2 v2.0.27
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.0
 	github.com/spf13/cobra v1.5.0
