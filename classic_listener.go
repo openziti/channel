@@ -19,9 +19,9 @@ package channel
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/identity"
 	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/foundation/v2/goroutines"
+	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/sirupsen/logrus"
 	"io"
@@ -224,7 +224,10 @@ func (listener *classicListener) ackHello(impl *classicImpl, request *Message, s
 		response.Headers[key] = val
 	}
 
-	response.Headers[ConnectionIdHeader] = []byte(impl.connectionId)
+	response.PutStringHeader(ConnectionIdHeader, impl.connectionId)
+	if listener.identity != nil {
+		response.PutStringHeader(IdHeader, listener.identity.Token)
+	}
 	response.sequence = HelloSequence
 
 	response.ReplyTo(request)

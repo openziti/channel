@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel"
+	"github.com/openziti/channel/v2"
 	"github.com/openziti/identity"
 	"io"
 	"net"
@@ -89,8 +89,8 @@ func (impl *memoryImpl) Tx(m *channel.Message) error {
 	return nil
 }
 
-func (impl *memoryImpl) Id() *identity.TokenId {
-	return impl.id
+func (impl *memoryImpl) Id() string {
+	return impl.id.Token
 }
 
 func (impl *memoryImpl) Headers() map[int32][]byte {

@@ -156,5 +156,11 @@ func (dialer *reconnectingDialer) sendHello(impl *reconnectingImpl) error {
 	}
 	impl.connectionId = string(response.Headers[ConnectionIdHeader])
 
+	if id, ok := response.GetStringHeader(IdHeader); ok {
+		impl.id = &identity.TokenId{Token: id}
+	} else if certs := impl.Certificates(); len(certs) > 0 {
+		impl.id = &identity.TokenId{Token: certs[0].Subject.CommonName}
+	}
+
 	return nil
 }

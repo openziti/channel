@@ -19,7 +19,7 @@ package underlay
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel"
+	"github.com/openziti/channel/v2"
 )
 
 const contentType = 99

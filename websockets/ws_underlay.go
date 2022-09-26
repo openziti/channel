@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"crypto/x509"
 	"github.com/gorilla/websocket"
-	"github.com/openziti/channel"
+	"github.com/openziti/channel/v2"
 	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
@@ -77,8 +77,8 @@ func (self *Underlay) Tx(m *channel.Message) error {
 	return self.peer.WriteMessage(websocket.BinaryMessage, data)
 }
 
-func (self *Underlay) Id() *identity.TokenId {
-	return self.id
+func (self *Underlay) Id() string {
+	return self.id.Token
 }
 
 func (self *Underlay) LogicalName() string {

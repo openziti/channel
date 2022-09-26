@@ -65,8 +65,8 @@ func (impl *existingConnImpl) Tx(m *Message) error {
 	return nil
 }
 
-func (impl *existingConnImpl) Id() *identity.TokenId {
-	return impl.id
+func (impl *existingConnImpl) Id() string {
+	return impl.id.Token
 }
 
 func (impl *existingConnImpl) Headers() map[int32][]byte {
