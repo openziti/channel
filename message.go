@@ -46,6 +46,7 @@ const (
 	HeartbeatHeader                 = 5
 	HeartbeatResponseHeader         = 6
 	TypeHeader                      = 7
+	IdHeader                        = 8
 
 	// Headers in the range 128-255 inclusive will be reflected when creating replies
 	ReflectedHeaderBitMask = 1 << 7
@@ -567,7 +568,6 @@ func marshalHeaders(headers map[int32][]byte) ([]byte, error) {
 }
 
 // readInt32 pulls a 4-byte int32 out of a byte array (or slice).
-//
 func readInt32(data []byte) int32 {
 	return int32(binary.LittleEndian.Uint32(data))
 }

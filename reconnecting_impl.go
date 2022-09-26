@@ -85,8 +85,8 @@ func (impl *reconnectingImpl) Tx(m *Message) error {
 	return nil
 }
 
-func (impl *reconnectingImpl) Id() *identity.TokenId {
-	return impl.id
+func (impl *reconnectingImpl) Id() string {
+	return impl.id.Token
 }
 
 func (impl *reconnectingImpl) Headers() map[int32][]byte {
@@ -158,7 +158,6 @@ func (impl *reconnectingImpl) tx(m *Message) error {
 }
 
 // pingInstance currently does a single-sided (unverified) ping to see if the peer connection is functional.
-//
 func (impl *reconnectingImpl) pingInstance() error {
 	log := pfxlog.ContextLogger(impl.Label())
 	defer log.Info("exiting")

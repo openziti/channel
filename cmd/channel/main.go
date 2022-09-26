@@ -18,7 +18,7 @@ package main
 
 import (
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/cmd/channel/subcmd"
+	"github.com/openziti/channel/v2/cmd/channel/subcmd"
 	"github.com/openziti/transport/v2"
 	"github.com/openziti/transport/v2/tcp"
 	"github.com/openziti/transport/v2/tls"

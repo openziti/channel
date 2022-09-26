@@ -24,7 +24,6 @@ import (
 	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/foundation/v2/info"
 	"github.com/openziti/foundation/v2/sequence"
-	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"
@@ -131,7 +130,7 @@ func AcceptNextChannel(logicalName string, underlayFactory UnderlayFactory, bind
 	return nil
 }
 
-func (channel *channelImpl) Id() *identity.TokenId {
+func (channel *channelImpl) Id() string {
 	return channel.underlay.Id()
 }
 

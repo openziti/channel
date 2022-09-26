@@ -19,7 +19,6 @@ package channel
 import (
 	"context"
 	"crypto/x509"
-	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"
@@ -124,9 +123,9 @@ type ReplyReceiver interface {
 }
 
 type Identity interface {
-	// The TokenId used to represent the identity of this channel to lower-level resources.
+	// The Id used to represent the identity of this channel to lower-level resources.
 	//
-	Id() *identity.TokenId
+	Id() string
 
 	// The LogicalName represents the purpose or usage of this channel (i.e. 'ctrl', 'mgmt' 'r/001', etc.) Usually used
 	// by humans in understand the logical purpose of a channel.

@@ -73,7 +73,6 @@ func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Config
 			log.Warnf("Retrying dial with protocol version %v", version)
 			continue
 		}
-		impl.id = dialer.identity
 		return impl, nil
 	}
 }
@@ -102,6 +101,13 @@ func (dialer *classicDialer) sendHello(impl *classicImpl) error {
 		return errors.New(result.Message)
 	}
 	impl.connectionId = string(response.Headers[ConnectionIdHeader])
+
+	if id, ok := response.GetStringHeader(IdHeader); ok {
+		impl.id = &identity.TokenId{Token: id}
+	} else if certs := impl.Certificates(); len(certs) > 0 {
+		impl.id = &identity.TokenId{Token: certs[0].Subject.CommonName}
+	}
+
 	impl.headers = response.Headers
 
 	return nil

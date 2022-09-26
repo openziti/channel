@@ -81,8 +81,8 @@ func (impl *classicImpl) Tx(m *Message) error {
 	return nil
 }
 
-func (impl *classicImpl) Id() *identity.TokenId {
-	return impl.id
+func (impl *classicImpl) Id() string {
+	return impl.id.Token
 }
 
 func (impl *classicImpl) Headers() map[int32][]byte {

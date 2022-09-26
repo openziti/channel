@@ -73,8 +73,8 @@ func (impl *wsImpl) Tx(m *Message) error {
 	return nil
 }
 
-func (impl *wsImpl) Id() *identity.TokenId {
-	return impl.id
+func (impl *wsImpl) Id() string {
+	return impl.id.Token
 }
 
 func (impl *wsImpl) Headers() map[int32][]byte {
