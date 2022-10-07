@@ -2,8 +2,8 @@ package channel
 
 import (
 	"fmt"
-	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/stretchr/testify/require"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -14,11 +14,11 @@ func TestBaselineHeartbeat(t *testing.T) {
 
 	errC := make(chan error, 10)
 	remoteDone := make(chan uint64, 1)
-	var done concurrenz.AtomicBoolean
+	var done atomic.Bool
 
 	go func() {
 		<-ticker.C
-		done.Set(true)
+		done.Store(true)
 	}()
 
 	server := newTestServer()
@@ -30,7 +30,7 @@ func TestBaselineHeartbeat(t *testing.T) {
 				remoteDone <- count
 			}()
 
-			for !ch.IsClosed() && !done.Get() {
+			for !ch.IsClosed() && !done.Load() {
 				msg := NewMessage(ContentTypePingType, []byte("hello"))
 				if err := msg.WithTimeout(time.Second).Send(ch); err != nil {
 					errC <- err
@@ -56,7 +56,7 @@ func TestBaselineHeartbeat(t *testing.T) {
 	defer func() { _ = ch.Close() }()
 
 	var count uint64
-	for !ch.IsClosed() && !done.Get() {
+	for !ch.IsClosed() && !done.Load() {
 		msg := NewMessage(ContentTypePingType, []byte("hello"))
 		err := msg.WithTimeout(time.Second).Send(ch)
 		req.NoError(err)
@@ -85,11 +85,11 @@ func TestBusyHeartbeat(t *testing.T) {
 
 	errC := make(chan error, 10)
 	remoteDone := make(chan uint64, 1)
-	var done concurrenz.AtomicBoolean
+	var done atomic.Bool
 
 	go func() {
 		<-ticker.C
-		done.Set(true)
+		done.Store(true)
 	}()
 
 	server := newTestServer()
@@ -107,7 +107,7 @@ func TestBusyHeartbeat(t *testing.T) {
 				remoteDone <- count
 			}()
 
-			for !ch.IsClosed() && !done.Get() {
+			for !ch.IsClosed() && !done.Load() {
 				msg := NewMessage(ContentTypePingType, []byte("hello"))
 				if err := msg.WithTimeout(time.Second).Send(ch); err != nil {
 					errC <- err
@@ -135,7 +135,7 @@ func TestBusyHeartbeat(t *testing.T) {
 	defer func() { _ = ch.Close() }()
 
 	var count uint64
-	for !ch.IsClosed() && !done.Get() {
+	for !ch.IsClosed() && !done.Load() {
 		msg := NewMessage(ContentTypePingType, []byte("hello"))
 		err := msg.WithTimeout(time.Second).Send(ch)
 		req.NoError(err)
@@ -171,11 +171,11 @@ func TestQuietHeartbeat(t *testing.T) {
 
 	errC := make(chan error, 10)
 	remoteDone := make(chan uint64, 1)
-	var done concurrenz.AtomicBoolean
+	var done atomic.Bool
 
 	go func() {
 		<-ticker.C
-		done.Set(true)
+		done.Store(true)
 	}()
 
 	server := newTestServer()
@@ -193,7 +193,7 @@ func TestQuietHeartbeat(t *testing.T) {
 				remoteDone <- count
 			}()
 
-			for !ch.IsClosed() && !done.Get() {
+			for !ch.IsClosed() && !done.Load() {
 				msg := NewMessage(ContentTypePingType, []byte("hello"))
 				if err := msg.WithTimeout(time.Second).Send(ch); err != nil {
 					errC <- err
@@ -222,7 +222,7 @@ func TestQuietHeartbeat(t *testing.T) {
 	defer func() { _ = ch.Close() }()
 
 	var count uint64
-	for !ch.IsClosed() && !done.Get() {
+	for !ch.IsClosed() && !done.Load() {
 		msg := NewMessage(ContentTypePingType, []byte("hello"))
 		err := msg.WithTimeout(time.Second).Send(ch)
 		req.NoError(err)

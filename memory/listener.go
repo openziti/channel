@@ -27,7 +27,6 @@ import (
 
 type memoryListener struct {
 	identity *identity.TokenId
-	handlers []channel.ConnectionHandler
 	ctx      *MemoryContext
 	created  chan channel.Underlay
 }

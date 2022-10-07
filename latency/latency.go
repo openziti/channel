@@ -28,7 +28,6 @@ const (
 )
 
 // LatencyHandler responds to latency messages with Result messages.
-//
 type LatencyHandler struct {
 	responses int32
 }
@@ -110,7 +109,7 @@ type Type uint8
 
 const (
 	RoundTripType  Type = 1
-	BeforeSendType      = 2
+	BeforeSendType Type = 2
 )
 
 type Handler interface {
@@ -206,7 +205,7 @@ func (self *SendTimeTracker) SendListener() channel.SendListener {
 }
 
 func (self *SendTimeTracker) NotifyBeforeWrite() {
-	t := time.Now().Sub(self.StartTime)
+	t := time.Since(self.StartTime)
 	self.Handler(BeforeSendType, t)
 }
 
@@ -246,7 +245,6 @@ func AddLatencyProbeResponder(binding channel.Binding) {
 }
 
 // Responder responds to latency messages with LatencyResponse messages.
-//
 type Responder struct {
 	responseChannel chan *channel.Message
 	ch              channel.Channel

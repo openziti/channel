@@ -147,6 +147,7 @@ func (h heartbeatRxEvent) handle(heartbeater *heartbeater) {
 	time.AfterFunc(2*time.Millisecond, func() {
 		select {
 		case heartbeater.events <- handleUnresponded{}:
+		default:
 		}
 	})
 }

@@ -17,7 +17,6 @@
 package channel
 
 import (
-	"fmt"
 	"github.com/michaelquigley/pfxlog"
 )
 
@@ -97,20 +96,4 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 	}
 
 	return nil, false
-}
-
-func attributesToString(attributes map[string]string) string {
-	keys := make([]string, 0)
-	for k := range attributes {
-		keys = append(keys, k)
-	}
-	out := "{"
-	for i := 0; i < len(keys); i++ {
-		if i > 0 {
-			out += " "
-		}
-		out += fmt.Sprintf("%s=[%s]", keys[i], attributes[keys[i]])
-	}
-	out += "}"
-	return out
 }

@@ -19,12 +19,12 @@ package channel
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/foundation/v2/goroutines"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/sirupsen/logrus"
 	"io"
+	"sync/atomic"
 	"time"
 )
 
@@ -38,7 +38,7 @@ type classicListener struct {
 	connectOptions ConnectOptions
 	tcfg           transport.Configuration
 	headers        map[int32][]byte
-	closed         concurrenz.AtomicBoolean
+	closed         atomic.Bool
 	listenerPool   goroutines.Pool
 }
 

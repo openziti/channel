@@ -41,13 +41,6 @@ func (impl *wsImpl) SetWriteTimeout(duration time.Duration) error {
 	return impl.peer.SetWriteDeadline(time.Now().Add(duration))
 }
 
-func (impl *wsImpl) rxHello() (*Message, error) {
-	msg, readF, marshallF, err := readHello(impl.peer)
-	impl.readF = readF
-	impl.marshalF = marshallF
-	return msg, err
-}
-
 func (impl *wsImpl) Rx() (*Message, error) {
 	if impl.closed {
 		return nil, errors.New("underlay closed")
