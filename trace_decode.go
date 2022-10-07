@@ -83,13 +83,13 @@ func decodeTraceAndFormat(decode []byte) string {
 				out += k
 				out += "=["
 				v := meta[k]
-				switch v.(type) {
+				switch v := v.(type) {
 				case string:
-					out += v.(string)
+					out += v
 				case float64:
-					out += fmt.Sprintf("%0.0f", v.(float64))
+					out += fmt.Sprintf("%0.0f", v)
 				case bool:
-					out += fmt.Sprintf("%t", v.(bool))
+					out += fmt.Sprintf("%t", v)
 				default:
 					out += fmt.Sprintf("<%s>", reflect.TypeOf(v))
 				}

@@ -82,19 +82,21 @@ func Read(path string, handler messageHandler) error {
 		switch messageType {
 		case int32(trace_pb.MessageType_ChannelStateType):
 			cs := &trace_pb.ChannelState{}
-			err := proto.Unmarshal(data, cs)
-			if err != nil {
+			if err = proto.Unmarshal(data, cs); err != nil {
 				return err
 			}
-			handler.Handle(cs)
+			if err = handler.Handle(cs); err != nil {
+				return err
+			}
 
 		case int32(trace_pb.MessageType_ChannelMessageType):
 			cm := &trace_pb.ChannelMessage{}
-			err = proto.Unmarshal(data, cm)
-			if err != nil {
+			if err = proto.Unmarshal(data, cm); err != nil {
 				return err
 			}
-			handler.Handle(cm)
+			if err = handler.Handle(cm); err != nil {
+				return err
+			}
 
 		default:
 			return errors.New("unexpected message")

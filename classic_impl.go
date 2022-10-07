@@ -20,10 +20,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -32,7 +32,7 @@ type classicImpl struct {
 	id           *identity.TokenId
 	connectionId string
 	headers      map[int32][]byte
-	closed       concurrenz.AtomicBoolean
+	closed       atomic.Bool
 	readF        readFunction
 	marshalF     marshalFunction
 }
@@ -57,14 +57,14 @@ func (impl *classicImpl) rxHello() (*Message, error) {
 }
 
 func (impl *classicImpl) Rx() (*Message, error) {
-	if impl.closed.Get() {
+	if impl.closed.Load() {
 		return nil, errors.New("underlay closed")
 	}
 	return impl.readF(impl.peer)
 }
 
 func (impl *classicImpl) Tx(m *Message) error {
-	if impl.closed.Get() {
+	if impl.closed.Load() {
 		return errors.New("underlay closed")
 	}
 
@@ -113,7 +113,7 @@ func (impl *classicImpl) Close() error {
 }
 
 func (impl *classicImpl) IsClosed() bool {
-	return impl.closed.Get()
+	return impl.closed.Load()
 }
 
 func newClassicImpl(peer transport.Conn, version uint32) *classicImpl {

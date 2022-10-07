@@ -21,18 +21,18 @@ import (
 	"crypto/x509"
 	"github.com/gorilla/websocket"
 	"github.com/openziti/channel/v2"
-	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
 type Underlay struct {
 	id     *identity.TokenId
 	peer   *websocket.Conn
-	closed concurrenz.AtomicBoolean
+	closed atomic.Bool
 	certs  []*x509.Certificate
 }
 
@@ -105,7 +105,7 @@ func (self *Underlay) Close() error {
 }
 
 func (self *Underlay) IsClosed() bool {
-	return self.closed.Get()
+	return self.closed.Load()
 }
 
 func (self *Underlay) Headers() map[int32][]byte {

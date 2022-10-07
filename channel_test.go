@@ -2,15 +2,15 @@ package channel
 
 import (
 	"fmt"
-	"github.com/openziti/identity"
-	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/foundation/v2/netz"
+	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2/tcp"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -162,8 +162,8 @@ func TestWriteTimeout(t *testing.T) {
 	ch := dialServer(options, t, nil)
 	defer func() { _ = ch.Close() }()
 
-	var stop concurrenz.AtomicBoolean
-	defer stop.Set(true)
+	var stop atomic.Bool
+	defer stop.Store(true)
 
 	errC := make(chan error, 1)
 	go func() {
@@ -171,7 +171,7 @@ func TestWriteTimeout(t *testing.T) {
 		for i := range buf {
 			buf[i] = byte(i)
 		}
-		for !stop.Get() {
+		for !stop.Load() {
 			msg := NewMessage(ContentTypePingType, buf)
 			err := msg.WithTimeout(time.Second).SendAndWaitForWire(ch)
 			if err != nil {
@@ -204,8 +204,8 @@ func TestNoWriteTimeout(t *testing.T) {
 	ch := dialServer(options, t, nil)
 	defer func() { _ = ch.Close() }()
 
-	var stop concurrenz.AtomicBoolean
-	defer stop.Set(true)
+	var stop atomic.Bool
+	defer stop.Store(true)
 
 	errC := make(chan error, 1)
 	go func() {
@@ -213,7 +213,7 @@ func TestNoWriteTimeout(t *testing.T) {
 		for i := range buf {
 			buf[i] = byte(i)
 		}
-		for !stop.Get() {
+		for !stop.Load() {
 			msg := NewMessage(ContentTypePingType, buf)
 			err := msg.WithTimeout(10 * time.Second).SendAndWaitForWire(ch)
 			if err != nil {

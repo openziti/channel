@@ -20,12 +20,12 @@ import (
 	"crypto/x509"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -33,7 +33,7 @@ func (impl *reconnectingImpl) Rx() (*Message, error) {
 	log := pfxlog.ContextLogger(impl.Label())
 
 	connected := true
-	for !impl.closed.Get() {
+	for !impl.closed.Load() {
 		if connected {
 			m, err := impl.rx()
 			if err != nil {
@@ -63,7 +63,7 @@ func (impl *reconnectingImpl) Tx(m *Message) error {
 
 	done := false
 	connected := true
-	for !done && !impl.closed.Get() {
+	for !done && !impl.closed.Load() {
 		if connected {
 			if err := impl.tx(m); err != nil {
 				log.Errorf("tx error (%s). starting reconnection process", err)
@@ -117,7 +117,7 @@ func (impl *reconnectingImpl) Close() error {
 }
 
 func (impl *reconnectingImpl) IsClosed() bool {
-	return impl.closed.Get()
+	return impl.closed.Load()
 }
 
 func newReconnectingImpl(peer transport.Conn, reconnectionHandler reconnectionHandler, timeout time.Duration) *reconnectingImpl {
@@ -207,10 +207,10 @@ type reconnectingImpl struct {
 	connectionId        string
 	headers             map[int32][]byte
 	reconnectionHandler reconnectionHandler
-	closed              concurrenz.AtomicBoolean
+	closed              atomic.Bool
 	readF               readFunction
 	marshalF            marshalFunction
-	disconnected        concurrenz.AtomicBoolean
+	disconnected        atomic.Bool
 	timeout             time.Duration
 }
 
