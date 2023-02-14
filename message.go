@@ -58,6 +58,14 @@ const magicLength = 4
 type readFunction func(io.Reader) (*Message, error)
 type marshalFunction func(m *Message) ([]byte, error)
 
+type stringError string
+
+func (s stringError) Error() string {
+	return string(s)
+}
+
+const BadMagicNumberError = stringError("protocol error: invalid header")
+
 type MessageHeader struct {
 	ContentType int32
 	sequence    int32
@@ -341,8 +349,6 @@ var magicV2 = []byte{0x03, 0x06, 0x09, 0x0c}
 
 const dataSectionV2 = 20
 
-var UnknownVersionError = errors.New("channel synchronization error, bad magic number")
-
 var magicV3 = []byte{0x03, 0x06, 0x09, 0x0d}
 
 type UnsupportedVersionError struct {
@@ -373,7 +379,7 @@ func readHello(peer io.Reader) (*Message, readFunction, marshalFunction, error) 
 		return msg, ReadV2, MarshalV2, err
 	}
 
-	return nil, defaultReadF, defaultMarshalF, UnknownVersionError
+	return nil, defaultReadF, defaultMarshalF, BadMagicNumberError
 }
 
 func readHelloV2(peer io.Reader) (*Message, error) {
@@ -414,7 +420,7 @@ func ReadV2(peer io.Reader) (*Message, error) {
 			log.Debug("message appears to be unknown version response")
 			return nil, readUnknownVersionResponse(messageSection[4:], peer)
 		}
-		return nil, errors.New("channel synchronization")
+		return nil, BadMagicNumberError
 	}
 
 	headersLength := readUint32(messageSection[12:16])

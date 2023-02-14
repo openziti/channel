@@ -17,11 +17,11 @@
 package channel
 
 import (
-	"errors"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
+	"github.com/pkg/errors"
 	"sync"
 	"time"
 )
@@ -145,6 +145,9 @@ func (dialer *reconnectingDialer) sendHello(impl *reconnectingImpl) error {
 
 	response, err := impl.rx()
 	if err != nil {
+		if errors.Is(err, BadMagicNumberError) {
+			return errors.Errorf("could not negotiate connection with %v, invalid header", impl.peer.RemoteAddr().String())
+		}
 		return err
 	}
 	if !response.IsReplyingTo(request.sequence) || response.ContentType != ContentTypeResultType {

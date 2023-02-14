@@ -18,10 +18,10 @@ package channel
 
 import (
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
+	"github.com/pkg/errors"
 	"net"
 	"sync/atomic"
 	"time"
