@@ -84,7 +84,7 @@ func (self *existingConnListener) receiveHello(impl *existingConnImpl) (*Message
 
 	request, err := impl.rxHello()
 	if err != nil {
-		if err == UnknownVersionError {
+		if err == BadMagicNumberError {
 			WriteUnknownVersionResponse(impl.peer)
 		}
 		_ = impl.Close()

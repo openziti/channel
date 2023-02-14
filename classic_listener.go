@@ -118,11 +118,7 @@ func (listener *classicListener) Close() error {
 	return nil
 }
 
-func (listener *classicListener) Create(_ time.Duration, tcfg transport.Configuration) (Underlay, error) {
-	listener.tcfg = tcfg
-	if listener.created == nil {
-		return nil, ListenerClosedError
-	}
+func (listener *classicListener) Create(_ time.Duration, _ transport.Configuration) (Underlay, error) {
 	select {
 	case impl := <-listener.created:
 		if impl != nil {
@@ -203,7 +199,7 @@ func (listener *classicListener) receiveHello(impl *classicImpl) (*Message, *Hel
 
 	request, err := impl.rxHello()
 	if err != nil {
-		if err == UnknownVersionError {
+		if err == BadMagicNumberError {
 			WriteUnknownVersionResponse(impl.peer)
 		}
 		_ = impl.Close()
