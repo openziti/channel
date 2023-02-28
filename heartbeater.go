@@ -1,10 +1,72 @@
 package channel
 
 import (
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"sync/atomic"
 	"time"
 )
+
+const (
+	DefaultHeartbeatSendInterval  = 10 * time.Second
+	DefaultHeartbeatCheckInterval = time.Second
+	DefaultHeartbeatTimeout       = 30 * time.Second
+)
+
+type HeartbeatOptions struct {
+	SendInterval             time.Duration `json:"sendInterval"`
+	CheckInterval            time.Duration `json:"checkInterval"`
+	CloseUnresponsiveTimeout time.Duration `json:"closeUnresponsiveTimeout"`
+	src                      map[interface{}]interface{}
+}
+
+func (self *HeartbeatOptions) GetDuration(name string) (*time.Duration, error) {
+	if value, found := self.src[name]; found {
+		if strVal, ok := value.(string); ok {
+			if d, err := time.ParseDuration(strVal); err == nil {
+				return &d, nil
+			} else {
+				return nil, errors.Wrapf(err, "invalid value for %v: %v", name, value)
+			}
+		} else {
+			return nil, errors.Errorf("invalid (non-string) value for %v: %v", name, value)
+		}
+	}
+	return nil, nil
+}
+
+func DefaultHeartbeatOptions() *HeartbeatOptions {
+	return &HeartbeatOptions{
+		SendInterval:             DefaultHeartbeatSendInterval,
+		CheckInterval:            DefaultHeartbeatCheckInterval,
+		CloseUnresponsiveTimeout: DefaultHeartbeatTimeout,
+	}
+}
+
+func LoadHeartbeatOptions(data map[interface{}]interface{}) (*HeartbeatOptions, error) {
+	options := DefaultHeartbeatOptions()
+	options.src = data
+
+	if value, err := options.GetDuration("sendInterval"); err != nil {
+		return nil, err
+	} else if value != nil {
+		options.SendInterval = *value
+	}
+
+	if value, err := options.GetDuration("checkInterval"); err != nil {
+		return nil, err
+	} else if value != nil {
+		options.CheckInterval = *value
+	}
+
+	if value, err := options.GetDuration("closeUnresponsiveTimeout"); err != nil {
+		return nil, err
+	} else if value != nil {
+		options.CheckInterval = *value
+	}
+
+	return options, nil
+}
 
 // HeartbeatCallback provide an interface that is notified when various heartbeat events take place
 type HeartbeatCallback interface {
