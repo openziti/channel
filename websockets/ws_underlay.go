@@ -115,3 +115,7 @@ func (self *Underlay) Headers() map[int32][]byte {
 func (self *Underlay) SetWriteTimeout(duration time.Duration) error {
 	return self.peer.SetWriteDeadline(time.Now().Add(duration))
 }
+
+func (self *Underlay) SetWriteDeadline(deadline time.Time) error {
+	return self.peer.SetWriteDeadline(deadline)
+}

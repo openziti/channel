@@ -61,6 +61,10 @@ func (impl *memoryImpl) SetWriteTimeout(time.Duration) error {
 	panic("SetWriteTimeout not implemented")
 }
 
+func (self *memoryImpl) SetWriteDeadline(deadline time.Time) error {
+	panic("SetWriteDeadline not implemented")
+}
+
 func (impl *memoryImpl) Rx() (*channel.Message, error) {
 	if impl.closed {
 		return nil, errors.New("underlay closed")
