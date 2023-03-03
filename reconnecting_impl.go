@@ -201,6 +201,10 @@ func (impl *reconnectingImpl) SetWriteTimeout(duration time.Duration) error {
 	return impl.peer.SetWriteDeadline(time.Now().Add(duration))
 }
 
+func (impl *reconnectingImpl) SetWriteDeadline(deadline time.Time) error {
+	return impl.peer.SetWriteDeadline(deadline)
+}
+
 type reconnectingImpl struct {
 	peer                transport.Conn
 	id                  *identity.TokenId

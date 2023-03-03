@@ -168,6 +168,7 @@ type Underlay interface {
 	IsClosed() bool
 	Headers() map[int32][]byte
 	SetWriteTimeout(duration time.Duration) error
+	SetWriteDeadline(time time.Time) error
 	GetLocalAddr() net.Addr
 	GetRemoteAddr() net.Addr
 }

@@ -41,6 +41,10 @@ func (impl *wsImpl) SetWriteTimeout(duration time.Duration) error {
 	return impl.peer.SetWriteDeadline(time.Now().Add(duration))
 }
 
+func (self *wsImpl) SetWriteDeadline(deadline time.Time) error {
+	return self.peer.SetWriteDeadline(deadline)
+}
+
 func (impl *wsImpl) Rx() (*Message, error) {
 	if impl.closed {
 		return nil, errors.New("underlay closed")

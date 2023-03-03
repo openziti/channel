@@ -49,6 +49,10 @@ func (impl *classicImpl) SetWriteTimeout(duration time.Duration) error {
 	return impl.peer.SetWriteDeadline(time.Now().Add(duration))
 }
 
+func (impl *classicImpl) SetWriteDeadline(deadline time.Time) error {
+	return impl.peer.SetWriteDeadline(deadline)
+}
+
 func (impl *classicImpl) rxHello() (*Message, error) {
 	msg, readF, marshallF, err := readHello(impl.peer)
 	impl.readF = readF
