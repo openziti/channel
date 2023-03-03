@@ -23,8 +23,7 @@ import (
 // Binding is used to add handlers to Channel.
 //
 // NOTE: It is intended that the Add* methods are used at initial channel setup, and not invoked on an in-service
-// Channel. This API may change in the future to enforce those semantics programmatically.
-//
+// Channel. The Binding should not be retained once the channel setup is complete
 type Binding interface {
 	Bind(h BindHandler) error
 	AddPeekHandler(h PeekHandler)
@@ -47,6 +46,26 @@ type BindHandlerF func(binding Binding) error
 
 func (f BindHandlerF) BindChannel(binding Binding) error {
 	return f(binding)
+}
+
+// BindHandlers takes the given handlers and returns a BindHandler which
+// runs the handlers one at a time, returning an error as soon as
+// an error is encountered, or nil, if no errors are encountered.
+func BindHandlers(handlers ...BindHandler) BindHandler {
+	if len(handlers) == 1 {
+		return handlers[0]
+	}
+
+	return BindHandlerF(func(binding Binding) error {
+		for _, handler := range handlers {
+			if handler != nil {
+				if err := handler.BindChannel(binding); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 type ConnectionHandler interface {
