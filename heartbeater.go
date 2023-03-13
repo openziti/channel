@@ -101,13 +101,16 @@ func ConfigureHeartbeat(binding Binding, heartbeatInterval time.Duration, checkI
 	go hb.pulse(checkInterval)
 }
 
+// Note: if altering this struct, be sure to account for 64 bit alignment on arm 32 bit arch
+// https://pkg.go.dev/sync/atomic#pkg-note-BUG
+// https://github.com/golang/go/issues/36606
 type heartbeater struct {
 	ch                   Channel
 	lastHeartbeatTx      int64
 	heartBeatIntervalNs  int64
+	unrespondedHeartbeat int64
 	callback             HeartbeatCallback
 	events               chan heartbeatEvent
-	unrespondedHeartbeat int64
 }
 
 func (self *heartbeater) HandleReceive(*Message, Channel) {
