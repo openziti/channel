@@ -101,7 +101,7 @@ func ConfigureHeartbeat(binding Binding, heartbeatInterval time.Duration, checkI
 	go hb.pulse(checkInterval)
 }
 
-// Note: if altering this struct, be sure to account for 64 bit alignment on arm 32 bit arm arch
+// Note: if altering this struct, be sure to account for 64 bit alignment on 32 bit arm arch
 // https://pkg.go.dev/sync/atomic#pkg-note-BUG
 // https://github.com/golang/go/issues/36606
 type heartbeater struct {
