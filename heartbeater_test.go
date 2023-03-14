@@ -8,6 +8,22 @@ import (
 	"time"
 )
 
+// A simple test to check for failure of alignment on atomic operations for 64 bit variables in a struct
+func Test64BitAlignment(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("One of the variables that was tested is not properly 64-bit aligned.")
+		}
+	}()
+
+	hb := heartbeater{}
+	chImpl := channelImpl{}
+
+	atomic.LoadInt64(&hb.lastHeartbeatTx)
+	atomic.LoadInt64(&hb.unrespondedHeartbeat)
+	atomic.LoadInt64(&chImpl.lastRead)
+}
+
 func TestBaselineHeartbeat(t *testing.T) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
