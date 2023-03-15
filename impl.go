@@ -44,7 +44,11 @@ func NextConnectionId() (string, error) {
 	return connectionSeq.NextHash()
 }
 
+// Note: if altering this struct, be sure to account for 64 bit alignment on 32 bit arm arch
+// https://pkg.go.dev/sync/atomic#pkg-note-BUG
+// https://github.com/golang/go/issues/36606
 type channelImpl struct {
+	lastRead          int64
 	logicalName       string
 	underlay          Underlay
 	options           *Options
@@ -60,7 +64,6 @@ type channelImpl struct {
 	errorHandlers     []ErrorHandler
 	closeHandlers     []CloseHandler
 	userData          interface{}
-	lastRead          int64
 }
 
 func NewChannel(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options) (Channel, error) {
