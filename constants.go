@@ -5,7 +5,7 @@ import "time"
 const (
 	DefaultOutstandingConnects = 16
 	DefaultQueuedConnects      = 1
-	DefaultConnectTimeout      = 1000 * time.Millisecond
+	DefaultConnectTimeout      = 5 * time.Second
 
 	MinQueuedConnects      = 1
 	MinOutstandingConnects = 1
