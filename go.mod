@@ -6,10 +6,10 @@ require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/michaelquigley/pfxlog v0.6.10
 	github.com/openziti/foundation/v2 v2.0.22
-	github.com/openziti/identity v1.0.48
-	github.com/openziti/transport/v2 v2.0.77
+	github.com/openziti/identity v1.0.49
+	github.com/openziti/transport/v2 v2.0.78
 	github.com/pkg/errors v0.9.1
-	github.com/sirupsen/logrus v1.9.0
+	github.com/sirupsen/logrus v1.9.1
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.2
 	google.golang.org/protobuf v1.30.0
