@@ -7,7 +7,7 @@ require (
 	github.com/michaelquigley/pfxlog v0.6.10
 	github.com/openziti/foundation/v2 v2.0.23
 	github.com/openziti/identity v1.0.51
-	github.com/openziti/transport/v2 v2.0.81
+	github.com/openziti/transport/v2 v2.0.82
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.2
 	github.com/spf13/cobra v1.7.0
@@ -21,6 +21,7 @@ require (
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/klauspost/compress v1.10.3 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
@@ -34,4 +35,5 @@ require (
 	golang.org/x/sys v0.8.0 // indirect
 	golang.org/x/term v0.8.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	nhooyr.io/websocket v1.8.7 // indirect
 )
