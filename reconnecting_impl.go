@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
@@ -90,7 +91,7 @@ func (impl *reconnectingImpl) Id() string {
 }
 
 func (impl *reconnectingImpl) Headers() map[int32][]byte {
-	return impl.headers
+	return impl.headers.Load()
 }
 
 func (impl *reconnectingImpl) LogicalName() string {
@@ -209,7 +210,7 @@ type reconnectingImpl struct {
 	peer                transport.Conn
 	id                  *identity.TokenId
 	connectionId        string
-	headers             map[int32][]byte
+	headers             concurrenz.AtomicValue[map[int32][]byte]
 	reconnectionHandler reconnectionHandler
 	closed              atomic.Bool
 	readF               readFunction

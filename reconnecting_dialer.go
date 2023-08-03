@@ -165,5 +165,7 @@ func (dialer *reconnectingDialer) sendHello(impl *reconnectingImpl) error {
 		impl.id = &identity.TokenId{Token: certs[0].Subject.CommonName}
 	}
 
+	impl.headers.Store(response.Headers)
+
 	return nil
 }
