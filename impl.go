@@ -243,7 +243,7 @@ func (channel *channelImpl) Send(s Sendable) error {
 	select {
 	case <-s.Context().Done():
 		if err := s.Context().Err(); err != nil {
-			return TimeoutError{error: errors.Wrap(err, "timeout waiting for message reply")}
+			return TimeoutError{error: errors.Wrap(err, "timeout waiting to put message in send queue")}
 		}
 		return TimeoutError{error: errors.New("timeout waiting to put message in send queue")}
 	case <-channel.closeNotify:
@@ -263,7 +263,7 @@ func (channel *channelImpl) TrySend(s Sendable) (bool, error) {
 	select {
 	case <-s.Context().Done():
 		if err := s.Context().Err(); err != nil {
-			return false, TimeoutError{errors.Wrap(err, "timeout waiting for message reply")}
+			return false, TimeoutError{errors.Wrap(err, "timeout waiting to put message in send queue")}
 		}
 		return false, TimeoutError{error: errors.New("timeout waiting to put message in send queue")}
 	case <-channel.closeNotify:
@@ -318,9 +318,11 @@ func (channel *channelImpl) rxer() {
 		m, err := channel.underlay.Rx()
 		if err != nil {
 			if err == io.EOF {
-				log.Debug("EOF")
+				log.WithError(err).Debug("EOF")
+			} else if channel.IsClosed() {
+				log.WithError(err).Debug("rx error")
 			} else {
-				log.Errorf("rx error (%s)", err)
+				log.WithError(err).Error("rx error")
 			}
 			return
 		}

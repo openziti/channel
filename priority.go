@@ -33,7 +33,6 @@ func (pq priorityHeap) Len() int {
 
 // Less sorts by sequence if the priority is equivalent, otherwise sorts by priority. This ensures that we don't beat
 // up the egress ordering buffer. We send packets in sequence order, unless priority is implicated.
-//
 func (pq priorityHeap) Less(i, j int) bool {
 	if pq[i].Priority() == pq[j].Priority() {
 		return pq[i].Sequence() < pq[j].Sequence()
