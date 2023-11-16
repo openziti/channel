@@ -21,7 +21,6 @@ import (
 )
 
 // pingHandler responds to Ping messages with Result messages.
-//
 type pingHandler struct{}
 
 func (h *pingHandler) ContentType() int32 {

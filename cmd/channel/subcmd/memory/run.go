@@ -21,8 +21,8 @@ import (
 	"github.com/openziti/channel/v2"
 	"github.com/openziti/channel/v2/cmd/channel/subcmd"
 	"github.com/openziti/channel/v2/memory"
-	"github.com/openziti/identity/dotziti"
 	"github.com/openziti/identity"
+	"github.com/openziti/identity/dotziti"
 	"github.com/spf13/cobra"
 	"time"
 )
