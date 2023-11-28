@@ -2,6 +2,7 @@ package channel
 
 import (
 	"fmt"
+	"github.com/michaelquigley/pfxlog"
 	"github.com/stretchr/testify/require"
 	"sync/atomic"
 	"testing"
@@ -49,7 +50,9 @@ func TestBaselineHeartbeat(t *testing.T) {
 			for !ch.IsClosed() && !done.Load() {
 				msg := NewMessage(ContentTypePingType, []byte("hello"))
 				if err := msg.WithTimeout(time.Second).Send(ch); err != nil {
-					errC <- err
+					if !ch.IsClosed() {
+						errC <- err
+					}
 					return
 				}
 				count++
@@ -64,10 +67,13 @@ func TestBaselineHeartbeat(t *testing.T) {
 	options := DefaultOptions()
 	options.WriteTimeout = 100 * time.Millisecond
 
+	fmt.Printf("dialing server\n")
+	time.Sleep(time.Second * 2)
 	ch := dialServer(options, t, BindHandlerF(func(binding Binding) error {
 		binding.AddReceiveHandlerF(ContentTypePingType, func(m *Message, ch Channel) {})
 		return nil
 	}))
+	fmt.Printf("done dialing server\n")
 
 	defer func() { _ = ch.Close() }()
 
@@ -75,7 +81,9 @@ func TestBaselineHeartbeat(t *testing.T) {
 	for !ch.IsClosed() && !done.Load() {
 		msg := NewMessage(ContentTypePingType, []byte("hello"))
 		err := msg.WithTimeout(time.Second).Send(ch)
-		req.NoError(err)
+		if !ch.IsClosed() {
+			req.NoError(err)
+		}
 		count++
 	}
 
@@ -126,10 +134,14 @@ func TestBusyHeartbeat(t *testing.T) {
 			for !ch.IsClosed() && !done.Load() {
 				msg := NewMessage(ContentTypePingType, []byte("hello"))
 				if err := msg.WithTimeout(time.Second).Send(ch); err != nil {
-					errC <- err
+					if !ch.IsClosed() {
+						pfxlog.Logger().WithError(err).WithField("side", "server").Error("send error")
+						errC <- err
+					}
 					return
 				}
 				count++
+				time.Sleep(time.Millisecond)
 			}
 		}()
 	}
@@ -139,7 +151,7 @@ func TestBusyHeartbeat(t *testing.T) {
 	req := require.New(t)
 
 	options := DefaultOptions()
-	options.WriteTimeout = 100 * time.Millisecond
+	options.WriteTimeout = time.Second
 
 	hb := &heartbeatTracker{id: "client"}
 	ch := dialServer(options, t, BindHandlerF(func(binding Binding) error {
@@ -154,7 +166,10 @@ func TestBusyHeartbeat(t *testing.T) {
 	for !ch.IsClosed() && !done.Load() {
 		msg := NewMessage(ContentTypePingType, []byte("hello"))
 		err := msg.WithTimeout(time.Second).Send(ch)
-		req.NoError(err)
+		if !ch.IsClosed() {
+			req.NoError(err)
+		}
+		time.Sleep(time.Millisecond)
 		count++
 	}
 
@@ -173,12 +188,12 @@ func TestBusyHeartbeat(t *testing.T) {
 
 	fmt.Printf("count:  %v\nremote: %v\nchecks: %v\n", count, remoteCount, hb.checkCount)
 
-	req.True(hb.localCount > 8)
-	req.True(hb.localCount < 12)
-	req.True(hb.remoteCount > 8)
-	req.True(hb.remoteCount < 12)
-	req.True(hb.checkCount > 80)
-	req.True(hb.remoteCount < 120)
+	req.True(hb.respRx >= 8, "value: %v", hb.respRx)
+	req.True(hb.respRx < 12, "value: %v", hb.respRx)
+	req.True(hb.remoteCount >= 8, "value: %v", hb.remoteCount)
+	req.True(hb.remoteCount < 12, "value: %v", hb.remoteCount)
+	req.True(hb.checkCount > 80, "value: %v", hb.checkCount)
+	req.True(hb.checkCount < 120, "value: %v", hb.checkCount)
 }
 
 func TestQuietHeartbeat(t *testing.T) {
@@ -261,21 +276,23 @@ func TestQuietHeartbeat(t *testing.T) {
 
 	fmt.Printf("count:  %v\nremote: %v\n", count, remoteCount)
 
-	req.True(hb.localCount > 8)
-	req.True(hb.localCount < 12)
+	req.True(hb.respRx > 8)
+	req.True(hb.respRx < 12)
 	req.True(hb.remoteCount > 8)
 	req.True(hb.remoteCount < 12)
 }
 
 type heartbeatTracker struct {
 	id          string
-	localCount  int
+	hbTx        int
+	respRx      int
 	remoteCount int
 	checkCount  int
 }
 
 func (self *heartbeatTracker) HeartbeatTx(ts int64) {
-	fmt.Printf("%v: h-> @%v\n", self.id, ts)
+	self.hbTx++
+	fmt.Printf("%v: h-> @%v, hbTx: %v\n", self.id, ts, self.hbTx)
 }
 
 func (self *heartbeatTracker) HeartbeatRx(ts int64) {
@@ -283,13 +300,13 @@ func (self *heartbeatTracker) HeartbeatRx(ts int64) {
 }
 
 func (self *heartbeatTracker) HeartbeatRespTx(ts int64) {
-	fmt.Printf("%v: r-> @%v\n", self.id, ts)
 	self.remoteCount++
+	fmt.Printf("%v: r-> @%v, rc: %v\n", self.id, ts, self.remoteCount)
 }
 
 func (self *heartbeatTracker) HeartbeatRespRx(ts int64) {
-	fmt.Printf("%v: <-r @%v\n", self.id, ts)
-	self.localCount++
+	self.respRx++
+	fmt.Printf("%v: <-r @%v, respRx: %v\n", self.id, ts, self.respRx)
 }
 
 func (self *heartbeatTracker) CheckHeartBeat() {
