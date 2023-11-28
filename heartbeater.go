@@ -117,19 +117,20 @@ func (self *heartbeater) HandleReceive(*Message, Channel) {
 	// ignore incoming heartbeat events, everything is handled by the transformer
 }
 
+func (self *heartbeater) queueEvent(event heartbeatEvent) {
+	select {
+	case self.events <- event:
+	default:
+	}
+}
+
 func (self *heartbeater) Rx(m *Message, _ Channel) {
 	if val, found := m.GetUint64Header(HeartbeatHeader); found {
-		select {
-		case self.events <- heartbeatRxEvent(val):
-		default:
-		}
+		self.queueEvent(heartbeatRxEvent(val))
 	}
 
 	if val, found := m.GetUint64Header(HeartbeatResponseHeader); found {
-		select {
-		case self.events <- heartbeatRespRxEvent(val):
-		default:
-		}
+		self.queueEvent(heartbeatRespRxEvent(val))
 	}
 }
 
@@ -138,19 +139,13 @@ func (self *heartbeater) Tx(m *Message, _ Channel) {
 	if now-self.lastHeartbeatTx > self.heartBeatIntervalNs {
 		m.PutUint64Header(HeartbeatHeader, uint64(now))
 		atomic.StoreInt64(&self.lastHeartbeatTx, now)
-		select {
-		case self.events <- heartbeatTxEvent(now):
-		default:
-		}
+		self.queueEvent(heartbeatTxEvent(now))
 	}
 
 	if unrespondedHeartbeat := atomic.LoadInt64(&self.unrespondedHeartbeat); unrespondedHeartbeat != 0 {
 		m.PutUint64Header(HeartbeatResponseHeader, uint64(unrespondedHeartbeat))
 		atomic.StoreInt64(&self.unrespondedHeartbeat, 0)
-		select {
-		case self.events <- heartbeatRespTxEvent(now):
-		default:
-		}
+		self.queueEvent(heartbeatRespTxEvent(now))
 	}
 }
 
@@ -179,7 +174,7 @@ func (self *heartbeater) sendHeartbeat() {
 	if err := m.WithTimeout(time.Second).SendAndWaitForWire(self.ch); err != nil && !self.ch.IsClosed() {
 		logrus.WithError(err).
 			WithField("channelId", self.ch.Label()).
-			Error("failed to send heartbeat")
+			Error("pulse failed to send heartbeat")
 	}
 }
 
@@ -188,7 +183,7 @@ func (self *heartbeater) sendHeartbeatIfQueueFree() {
 	if err := m.WithTimeout(10 * time.Millisecond).Send(self.ch); err != nil && !self.ch.IsClosed() {
 		logrus.WithError(err).
 			WithField("channelId", self.ch.Label()).
-			Error("failed to send heartbeat")
+			Error("handleUnresponded failed to send heartbeat")
 	}
 }
 
