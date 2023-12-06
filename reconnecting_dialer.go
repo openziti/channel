@@ -99,6 +99,9 @@ func (dialer *reconnectingDialer) Reconnect(impl *reconnectingImpl) error {
 	dialer.reconnectLock.Lock()
 	defer dialer.reconnectLock.Unlock()
 
+	impl.reconnecting.Store(true)
+	defer impl.reconnecting.Store(false)
+
 	if err := impl.pingInstance(); err != nil {
 		log.Errorf("unable to ping (%s)", err)
 		for i := 0; true; i++ {

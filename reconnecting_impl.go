@@ -206,6 +206,10 @@ func (impl *reconnectingImpl) SetWriteDeadline(deadline time.Time) error {
 	return impl.peer.SetWriteDeadline(deadline)
 }
 
+func (impl *reconnectingImpl) IsConnected() bool {
+	return !impl.reconnecting.Load() && !impl.disconnected.Load()
+}
+
 type reconnectingImpl struct {
 	peer                transport.Conn
 	id                  *identity.TokenId
@@ -216,6 +220,7 @@ type reconnectingImpl struct {
 	readF               readFunction
 	marshalF            marshalFunction
 	disconnected        atomic.Bool
+	reconnecting        atomic.Bool
 	timeout             time.Duration
 }
 
