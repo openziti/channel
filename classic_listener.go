@@ -22,6 +22,7 @@ import (
 	"github.com/openziti/foundation/v2/goroutines"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"io"
 	"sync/atomic"
@@ -34,6 +35,7 @@ type classicListener struct {
 	socket         io.Closer
 	close          chan struct{}
 	handlers       []ConnectionHandler
+	acceptF        func(underlay Underlay)
 	created        chan Underlay
 	connectOptions ConnectOptions
 	tcfg           transport.Configuration
@@ -50,12 +52,13 @@ func DefaultListenerConfig() ListenerConfig {
 
 type ListenerConfig struct {
 	ConnectOptions
-	Headers          map[int32][]byte
-	TransportConfig  transport.Configuration
-	PoolConfigurator func(config *goroutines.PoolConfig)
+	Headers            map[int32][]byte
+	TransportConfig    transport.Configuration
+	PoolConfigurator   func(config *goroutines.PoolConfig)
+	ConnectionHandlers []ConnectionHandler
 }
 
-func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig) UnderlayListener {
+func newClassicListener(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig) *classicListener {
 	closeNotify := make(chan struct{})
 
 	poolConfig := goroutines.PoolConfig{
@@ -87,16 +90,39 @@ func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 		identity:       identity,
 		endpoint:       endpoint,
 		close:          closeNotify,
-		created:        make(chan Underlay),
 		connectOptions: config.ConnectOptions,
 		tcfg:           config.TransportConfig,
 		headers:        config.Headers,
 		listenerPool:   pool,
+		handlers:       config.ConnectionHandlers,
 	}
 }
 
+func NewClassicListenerF(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig, f func(underlay Underlay)) (io.Closer, error) {
+	listener := newClassicListener(identity, endpoint, config)
+	listener.acceptF = f
+	if err := listener.Listen(); err != nil {
+		return nil, err
+	}
+	return listener, nil
+}
+
+func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig) UnderlayListener {
+	listener := newClassicListener(identity, endpoint, config)
+	listener.created = make(chan Underlay)
+	listener.acceptF = func(underlay Underlay) {
+		select {
+		case listener.created <- underlay:
+		case <-listener.close:
+			pfxlog.Logger().WithField("underlay", underlay.Label()).Info("channel closed, can't notify of new connection")
+			return
+		}
+	}
+	return listener
+}
+
 func (listener *classicListener) Listen(handlers ...ConnectionHandler) error {
-	listener.handlers = handlers
+	listener.handlers = append(listener.handlers, handlers...)
 	socket, err := listener.endpoint.Listen("classic", listener.identity, listener.acceptConnection, listener.tcfg)
 	if err != nil {
 		return err
@@ -119,6 +145,10 @@ func (listener *classicListener) Close() error {
 }
 
 func (listener *classicListener) Create(_ time.Duration, _ transport.Configuration) (Underlay, error) {
+	if listener.created == nil {
+		return nil, errors.New("this listener was not set up for Create to be called, programming error")
+	}
+
 	select {
 	case impl := <-listener.created:
 		if impl != nil {
@@ -177,12 +207,7 @@ func (listener *classicListener) acceptConnection(peer transport.Conn) {
 		impl.headers = hello.Headers
 
 		if err := listener.ackHello(impl, request, true, ""); err == nil {
-			select {
-			case listener.created <- impl:
-			case <-listener.close:
-				log.Infof("channel closed, can't notify of new connection [%s] (%v)", peer.Detail().Address, err)
-				return
-			}
+			listener.acceptF(impl)
 		} else {
 			log.Errorf("error acknowledging hello for [%s] (%v)", peer.Detail().Address, err)
 		}
