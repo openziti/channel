@@ -62,7 +62,7 @@ func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Config
 		}
 
 		impl := newClassicImpl(peer, version)
-		if err := dialer.sendHello(impl); err != nil {
+		if err := dialer.sendHello(impl, timeout); err != nil {
 			if tryCount > 0 {
 				return nil, err
 			} else {
@@ -77,10 +77,22 @@ func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Config
 	}
 }
 
-func (dialer *classicDialer) sendHello(impl *classicImpl) error {
+func (dialer *classicDialer) sendHello(impl *classicImpl, timeout time.Duration) error {
 	log := pfxlog.ContextLogger(impl.Label())
 	defer log.Debug("exited")
 	log.Debug("started")
+
+	if timeout == 0 {
+		timeout = time.Minute
+	}
+
+	if err := impl.peer.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = impl.peer.SetReadDeadline(time.Time{})
+	}()
 
 	request := NewHello(dialer.identity.Token, dialer.headers)
 	request.sequence = HelloSequence
