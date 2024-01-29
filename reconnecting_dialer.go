@@ -99,35 +99,41 @@ func (dialer *reconnectingDialer) Reconnect(impl *reconnectingImpl) error {
 	dialer.reconnectLock.Lock()
 	defer dialer.reconnectLock.Unlock()
 
-	impl.reconnecting.Store(true)
-	defer impl.reconnecting.Store(false)
-
-	if err := impl.pingInstance(); err != nil {
+	if err := impl.pingInstance(); err == nil {
+		return nil
+	} else {
 		log.Errorf("unable to ping (%s)", err)
-		for i := 0; true; i++ {
-			peer, err := dialer.endpoint.Dial("reconnecting", dialer.identity, impl.timeout, dialer.tcfg)
-			if err == nil {
-				impl.peer = peer
-				if err := dialer.sendHello(impl); err == nil {
-					if dialer.reconnectHandler != nil {
-						dialer.reconnectHandler()
-					}
-					return nil
-				} else {
-					if version, ok := GetRetryVersion(err); ok {
-						impl.setProtocolVersion(version)
-					}
-					log.Errorf("hello attempt [#%d] failed (%s)", i+1, err)
-					time.Sleep(5 * time.Second)
-				}
+	}
 
+	impl.reconnecting.Store(true)
+	defer func() {
+		impl.reconnecting.Store(false)
+		if dialer.reconnectHandler != nil {
+			dialer.reconnectHandler()
+		}
+	}()
+
+	attempt := 0
+	for {
+		attempt++
+		peer, err := dialer.endpoint.Dial("reconnecting", dialer.identity, impl.timeout, dialer.tcfg)
+		if err == nil {
+			impl.peer = peer
+			if err := dialer.sendHello(impl); err == nil {
+				return nil
 			} else {
-				log.Errorf("reconnection attempt [#%d] failed (%s)", i+1, err)
+				if version, ok := GetRetryVersion(err); ok {
+					impl.setProtocolVersion(version)
+				}
+				log.Errorf("hello attempt [#%d] failed (%s)", attempt, err)
 				time.Sleep(5 * time.Second)
 			}
+
+		} else {
+			log.Errorf("reconnection attempt [#%d] failed (%s)", attempt, err)
+			time.Sleep(5 * time.Second)
 		}
 	}
-	return nil
 }
 
 func (dialer *reconnectingDialer) sendHello(impl *reconnectingImpl) error {
