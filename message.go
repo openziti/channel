@@ -161,6 +161,30 @@ func (header *MessageHeader) GetStringHeader(key int32) (string, bool) {
 	return header.Headers.GetStringHeader(key)
 }
 
+func (header *MessageHeader) PutStringSliceHeader(key int32, s []string) {
+	header.Headers.PutStringSliceHeader(key, s)
+}
+
+func (header *MessageHeader) GetStringSliceHeader(key int32) ([]string, bool, error) {
+	return header.Headers.GetStringSliceHeader(key)
+}
+
+func (header *MessageHeader) PutU32ToBytesMapHeader(key int32, m map[uint32][]byte) {
+	header.Headers.PutU32ToBytesMapHeader(key, m)
+}
+
+func (header *MessageHeader) GetU32ToBytesMapHeader(key int32) (map[uint32][]byte, bool, error) {
+	return header.Headers.GetU32ToBytesMapHeader(key)
+}
+
+func (header *MessageHeader) PutStringToStringMapHeader(key int32, m map[string]string) {
+	header.Headers.PutStringToStringMapHeader(key, m)
+}
+
+func (header *MessageHeader) GetStringToStringMapHeader(key int32) (map[string]string, bool, error) {
+	return header.Headers.GetStringToStringMapHeader(key)
+}
+
 type Headers map[int32][]byte
 
 func (self Headers) PutUint64Header(key int32, value uint64) {
@@ -244,6 +268,48 @@ func (self Headers) GetBoolHeader(key int32) (bool, bool) {
 func (self Headers) GetStringHeader(key int32) (string, bool) {
 	encoded, ok := self[key]
 	return string(encoded), ok
+}
+
+func (self Headers) PutStringSliceHeader(key int32, s []string) {
+	self[key] = EncodeStringSlice(s)
+}
+
+func (self Headers) GetStringSliceHeader(key int32) ([]string, bool, error) {
+	encoded, ok := self[key]
+	if !ok {
+		return nil, false, nil
+	}
+
+	v, err := DecodeStringSlice(encoded)
+	return v, true, err
+}
+
+func (self Headers) PutU32ToBytesMapHeader(key int32, m map[uint32][]byte) {
+	self[key] = EncodeU32ToBytesMap(m)
+}
+
+func (self Headers) GetU32ToBytesMapHeader(key int32) (map[uint32][]byte, bool, error) {
+	encoded, ok := self[key]
+	if !ok {
+		return nil, false, nil
+	}
+
+	v, err := DecodeU32ToBytesMap(encoded)
+	return v, true, err
+}
+
+func (self Headers) PutStringToStringMapHeader(key int32, m map[string]string) {
+	self[key] = EncodeStringToStringMap(m)
+}
+
+func (self Headers) GetStringToStringMapHeader(key int32) (map[string]string, bool, error) {
+	encoded, ok := self[key]
+	if !ok {
+		return nil, false, nil
+	}
+
+	v, err := DecodeStringToStringMap(encoded)
+	return v, true, err
 }
 
 func NewMessage(contentType int32, body []byte) *Message {
@@ -654,4 +720,212 @@ func getRetryVersionFor(err error, defaultVersion uint32, localVersions ...uint3
 
 	log.Infof("defaulting to version %v", defaultVersion)
 	return defaultVersion, false
+}
+
+func DecodeString(t string, b []byte) ([]byte, string, error) {
+	if len(b) < 4 {
+		return nil, "", fmt.Errorf("invalid string in %s, not enough bytes for string length", t)
+	}
+	sl := binary.LittleEndian.Uint32(b[0:4])
+	if sl > 8192 {
+		return nil, "", fmt.Errorf("strings in %s may have max length 8192", t)
+	}
+	b = b[4:]
+	if sl > uint32(len(b)) {
+		return nil, "", fmt.Errorf("invalid string length in %s, longer than remaining data", t)
+	}
+	s := string(b[:sl])
+	b = b[sl:]
+	return b, s, nil
+}
+
+func EncodeStringSlice(strSlice []string) []byte {
+	if len(strSlice) == 0 {
+		return nil
+	}
+	l := 4 + (4 * len(strSlice))
+	for _, s := range strSlice {
+		l += len(s)
+	}
+	result := make([]byte, l)
+
+	binary.LittleEndian.PutUint32(result, uint32(len(strSlice)))
+	idx := 4
+	for _, s := range strSlice {
+		binary.LittleEndian.PutUint32(result[idx:], uint32(len(s)))
+		copy(result[idx+4:], s)
+		idx += 4 + len(s)
+	}
+
+	if idx != l {
+		panic(fmt.Errorf("invalid length was %d, expected %d", idx, l))
+	}
+
+	return result
+}
+
+func DecodeStringSlice(b []byte) ([]string, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+
+	if len(b) < 4 {
+		return nil, errors.New("invalid string slice, not enough bytes for slice length")
+	}
+
+	var result []string
+	l := binary.LittleEndian.Uint32(b[0:4])
+
+	if l > 128 {
+		return nil, errors.New("string slice may have at most 128 entries")
+	}
+	b = b[4:]
+	var i uint32
+	var err error
+	for i = 0; i < l; i++ {
+		var s string
+		b, s, err = DecodeString("string slice", b)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, s)
+	}
+
+	return result, nil
+}
+
+func EncodeU32ToBytesMap(m map[uint32][]byte) []byte {
+	if len(m) == 0 {
+		return nil
+	}
+	l := 4 + (8 * len(m))
+	for _, v := range m {
+		l += len(v)
+	}
+	result := make([]byte, l)
+
+	binary.LittleEndian.PutUint32(result, uint32(len(m)))
+	idx := 4
+	for k, v := range m {
+		binary.LittleEndian.PutUint32(result[idx:], k)
+		binary.LittleEndian.PutUint32(result[idx+4:], uint32(len(v)))
+		copy(result[idx+8:], v)
+		idx += 8 + len(v)
+	}
+
+	if idx != l {
+		panic(fmt.Errorf("invalid length was %d, expected %d", idx, l))
+	}
+
+	return result
+}
+
+func DecodeU32ToBytesMap(b []byte) (map[uint32][]byte, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+
+	if len(b) < 4 {
+		return nil, errors.New("invalid uint32->bytes map, not enough bytes for map length")
+	}
+
+	result := map[uint32][]byte{}
+	l := binary.LittleEndian.Uint32(b[0:4])
+
+	if l > 128 {
+		return nil, errors.New("uint32->bytes map may have at most 128 entries")
+	}
+	b = b[4:]
+	var i uint32
+	for i = 0; i < l; i++ {
+		if len(b) < 4 {
+			return nil, errors.New("invalid uint32->bytes map, not enough bytes for key")
+		}
+		key := binary.LittleEndian.Uint32(b[0:4])
+		b = b[4:]
+		if len(b) < 4 {
+			return nil, errors.New("invalid uint32->bytes map, not enough bytes for entry length")
+		}
+		entryLen := binary.LittleEndian.Uint32(b[0:4])
+		if entryLen > 8192 {
+			return nil, errors.New("entries in uint32->bytes map may have max length 8192")
+		}
+		b = b[4:]
+		if entryLen > uint32(len(b)) {
+			return nil, errors.New("invalid uint32->bytes map entry length, longer than remaining data")
+		}
+		if entryLen == 0 {
+			result[key] = nil
+		} else {
+			result[key] = b[:entryLen]
+			b = b[entryLen:]
+		}
+	}
+
+	return result, nil
+}
+
+func EncodeStringToStringMap(m map[string]string) []byte {
+	if len(m) == 0 {
+		return nil
+	}
+	l := 4 + (8 * len(m))
+	for k, v := range m {
+		l += len(k) + len(v)
+	}
+	result := make([]byte, l)
+
+	binary.LittleEndian.PutUint32(result, uint32(len(m)))
+	idx := 4
+	for k, v := range m {
+		binary.LittleEndian.PutUint32(result[idx:], uint32(len(k)))
+		copy(result[idx+4:], k)
+		idx += 4 + len(k)
+
+		binary.LittleEndian.PutUint32(result[idx:], uint32(len(v)))
+		copy(result[idx+4:], v)
+		idx += 4 + len(v)
+	}
+
+	if idx != l {
+		panic(fmt.Errorf("invalid length was %d, expected %d", idx, l))
+	}
+
+	return result
+}
+
+func DecodeStringToStringMap(b []byte) (map[string]string, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+
+	if len(b) < 4 {
+		return nil, errors.New("invalid string->string map, not enough bytes for map length")
+	}
+
+	result := map[string]string{}
+	l := binary.LittleEndian.Uint32(b[0:4])
+
+	if l > 128 {
+		return nil, errors.New("string->string map may have at most 128 entries")
+	}
+	b = b[4:]
+	var i uint32
+	var err error
+	for i = 0; i < l; i++ {
+		var key string
+		b, key, err = DecodeString("string->string map", b)
+		if err != nil {
+			return nil, err
+		}
+
+		var val string
+		b, val, err = DecodeString("string->string map", b)
+		if err != nil {
+			return nil, err
+		}
+		result[key] = val
+	}
+
+	return result, nil
 }

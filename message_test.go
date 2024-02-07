@@ -18,6 +18,7 @@ package channel
 
 import (
 	"errors"
+	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
@@ -60,4 +61,106 @@ func Test_getRetryVersionFor(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_StrSliceEncodeDecode(t *testing.T) {
+	req := assert.New(t)
+
+	test := func(s []string) {
+		encoded := EncodeStringSlice(s)
+		decoded, err := DecodeStringSlice(encoded)
+		req.NoError(err)
+		req.Equal(s, decoded)
+	}
+	test(nil)
+	test([]string{""})
+	test([]string{"hello"})
+	test([]string{"hello", ""})
+	test([]string{"", "hello"})
+	test([]string{"hello", "how are you!", "i hope things are ok"})
+
+	encoded := EncodeStringSlice([]string{})
+	decoded, err := DecodeStringSlice(encoded)
+	req.NoError(err)
+	req.Equal(([]string)(nil), decoded)
+}
+
+func Test_U32ToBytesMapEncodeDecode(t *testing.T) {
+	req := assert.New(t)
+
+	test := func(m map[uint32][]byte) {
+		encoded := EncodeU32ToBytesMap(m)
+		decoded, err := DecodeU32ToBytesMap(encoded)
+		req.NoError(err)
+		req.Equal(m, decoded)
+	}
+	test(nil)
+	test(map[uint32][]byte{
+		1: nil,
+	})
+	test(map[uint32][]byte{
+		1: nil,
+		2: []byte("hello"),
+	})
+	test(map[uint32][]byte{
+		1: []byte("hello"),
+		2: nil,
+	})
+
+	test(map[uint32][]byte{
+		100: nil,
+		200: []byte("hello"),
+		300: []byte("good bye there"),
+	})
+
+	test(map[uint32][]byte{
+		100: []byte("some more entries here for good measure"),
+		200: []byte("hello"),
+		300: []byte("good bye there"),
+	})
+
+	encoded := EncodeU32ToBytesMap(map[uint32][]byte{})
+	decoded, err := DecodeU32ToBytesMap(encoded)
+	req.NoError(err)
+	req.Equal((map[uint32][]byte)(nil), decoded)
+}
+
+func Test_StringToStringMapEncodeDecode(t *testing.T) {
+	req := assert.New(t)
+
+	test := func(m map[string]string) {
+		encoded := EncodeStringToStringMap(m)
+		decoded, err := DecodeStringToStringMap(encoded)
+		req.NoError(err)
+		req.Equal(m, decoded)
+	}
+	test(nil)
+	test(map[string]string{
+		"one": "",
+	})
+	test(map[string]string{
+		"one": "",
+		"two": "hello",
+	})
+	test(map[string]string{
+		"one": "hello",
+		"two": "",
+	})
+
+	test(map[string]string{
+		"one hundred": "",
+		"other":       "hello",
+		"different":   "good bye there",
+	})
+
+	test(map[string]string{
+		"foo":  "some more entries here for good measure",
+		"bart": "hello",
+		"quux": "good bye there",
+	})
+
+	encoded := EncodeStringToStringMap(map[string]string{})
+	decoded, err := DecodeStringToStringMap(encoded)
+	req.NoError(err)
+	req.Equal((map[string]string)(nil), decoded)
 }
