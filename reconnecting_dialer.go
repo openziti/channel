@@ -72,7 +72,7 @@ func (dialer *reconnectingDialer) Create(timeout time.Duration, tcfg transport.C
 
 	version := uint32(2)
 
-	peer, err := dialer.endpoint.DialWithLocalBinding("reconnecting", dialer.localBinding, dialer.identity, timeout, tcfg)
+	peer, err := dialer.dial(timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +89,10 @@ func (dialer *reconnectingDialer) Create(timeout time.Duration, tcfg transport.C
 	}
 
 	return impl, nil
+}
+
+func (dialer *reconnectingDialer) dial(timeout time.Duration) (transport.Conn, error) {
+	return dialer.endpoint.DialWithLocalBinding("reconnecting", dialer.localBinding, dialer.identity, timeout, dialer.tcfg)
 }
 
 func (dialer *reconnectingDialer) Reconnect(impl *reconnectingImpl) error {
@@ -116,7 +120,7 @@ func (dialer *reconnectingDialer) Reconnect(impl *reconnectingImpl) error {
 	attempt := 0
 	for {
 		attempt++
-		peer, err := dialer.endpoint.Dial("reconnecting", dialer.identity, impl.timeout, dialer.tcfg)
+		peer, err := dialer.dial(impl.timeout)
 		if err == nil {
 			impl.peer = peer
 			if err := dialer.sendHello(impl); err == nil {
