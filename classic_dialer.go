@@ -17,52 +17,63 @@
 package channel
 
 import (
+	"errors"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
-	"github.com/pkg/errors"
 	"time"
 )
 
 type classicDialer struct {
-	identity     *identity.TokenId
-	endpoint     transport.Address
-	localBinding string
-	headers      map[int32][]byte
+	identity        *identity.TokenId
+	endpoint        transport.Address
+	localBinding    string
+	headers         map[int32][]byte
+	underlayFactory func(peer transport.Conn, deadline time.Time, version uint32) (Underlay, error)
 }
 
 func NewClassicDialerWithBindAddress(identity *identity.TokenId, endpoint transport.Address, localBinding string, headers map[int32][]byte) UnderlayFactory {
-	return &classicDialer{
+	result := &classicDialer{
 		identity:     identity,
 		endpoint:     endpoint,
 		localBinding: localBinding,
 		headers:      headers,
 	}
+
+	if endpoint.Type() == "dtls" {
+		result.underlayFactory = result.createDatagramUnderlay
+	} else {
+		result.underlayFactory = result.createClassicUnderlay
+	}
+
+	return result
 }
 
 func NewClassicDialer(identity *identity.TokenId, endpoint transport.Address, headers map[int32][]byte) UnderlayFactory {
 	return NewClassicDialerWithBindAddress(identity, endpoint, "", headers)
 }
 
-func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Configuration) (Underlay, error) {
-	log := pfxlog.ContextLogger(dialer.endpoint.String())
+func (self *classicDialer) Create(timeout time.Duration, tcfg transport.Configuration) (Underlay, error) {
+	log := pfxlog.ContextLogger(self.endpoint.String())
 	log.Debug("started")
 	defer log.Debug("exited")
+
+	deadline := time.Now().Add(timeout)
 
 	version := uint32(2)
 	tryCount := 0
 
-	log.Debugf("Attempting to dial with bind: %s", dialer.localBinding)
+	log.Debugf("Attempting to dial with bind: %s", self.localBinding)
 
-	for {
-		peer, err := dialer.endpoint.DialWithLocalBinding("classic", dialer.localBinding, dialer.identity, timeout, tcfg)
+	for time.Now().After(deadline) {
+		peer, err := self.endpoint.DialWithLocalBinding("classic", self.localBinding, self.identity, timeout, tcfg)
 		if err != nil {
 			return nil, err
 		}
 
-		impl := newClassicImpl(peer, version)
-		if err := dialer.sendHello(impl, timeout); err != nil {
+		var underlay Underlay
+		if underlay, err = self.underlayFactory(peer, deadline, version); err != nil {
 			if tryCount > 0 {
 				return nil, err
 			} else {
@@ -73,20 +84,25 @@ func (dialer *classicDialer) Create(timeout time.Duration, tcfg transport.Config
 			log.Warnf("Retrying dial with protocol version %v", version)
 			continue
 		}
-		return impl, nil
+		return underlay, nil
 	}
+	return nil, errors.New("timeout waiting for dial")
 }
 
-func (dialer *classicDialer) sendHello(impl *classicImpl, timeout time.Duration) error {
+func (self *classicDialer) createClassicUnderlay(peer transport.Conn, deadline time.Time, version uint32) (Underlay, error) {
+	impl := newClassicImpl(peer, version)
+	if err := self.sendHello(impl, deadline); err != nil {
+		return nil, err
+	}
+	return impl, nil
+}
+
+func (self *classicDialer) sendHello(impl *classicImpl, deadline time.Time) error {
 	log := pfxlog.ContextLogger(impl.Label())
 	defer log.Debug("exited")
 	log.Debug("started")
 
-	if timeout == 0 {
-		timeout = time.Minute
-	}
-
-	if err := impl.peer.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+	if err := impl.peer.SetReadDeadline(deadline); err != nil {
 		return err
 	}
 
@@ -94,7 +110,7 @@ func (dialer *classicDialer) sendHello(impl *classicImpl, timeout time.Duration)
 		_ = impl.peer.SetReadDeadline(time.Time{})
 	}()
 
-	request := NewHello(dialer.identity.Token, dialer.headers)
+	request := NewHello(self.identity.Token, self.headers)
 	request.sequence = HelloSequence
 	if err := impl.Tx(request); err != nil {
 		_ = impl.peer.Close()
@@ -104,7 +120,7 @@ func (dialer *classicDialer) sendHello(impl *classicImpl, timeout time.Duration)
 	response, err := impl.Rx()
 	if err != nil {
 		if errors.Is(err, BadMagicNumberError) {
-			return errors.Errorf("could not negotiate connection with %v, invalid header", impl.peer.RemoteAddr().String())
+			return fmt.Errorf("could not negotiate connection with %v, invalid header", impl.peer.RemoteAddr().String())
 		}
 		return err
 	}
@@ -116,14 +132,77 @@ func (dialer *classicDialer) sendHello(impl *classicImpl, timeout time.Duration)
 		return errors.New(result.Message)
 	}
 	impl.connectionId = string(response.Headers[ConnectionIdHeader])
+	impl.headers = response.Headers
 
 	if id, ok := response.GetStringHeader(IdHeader); ok {
-		impl.id = &identity.TokenId{Token: id}
+		impl.id = id
 	} else if certs := impl.Certificates(); len(certs) > 0 {
-		impl.id = &identity.TokenId{Token: certs[0].Subject.CommonName}
+		impl.id = certs[0].Subject.CommonName
 	}
 
+	return nil
+}
+
+func (self *classicDialer) createDatagramUnderlay(peer transport.Conn, deadline time.Time, version uint32) (Underlay, error) {
+	log := pfxlog.ContextLogger(self.endpoint.String())
+
+	defer func() {
+		if err := peer.SetDeadline(time.Time{}); err != nil { // clear write deadline
+			log.WithError(err).Error("unable to clear write deadline")
+		}
+	}()
+
+	impl := NewDatagramUnderlay(self.identity.Token, peer)
+	if err := self.sendDatagramHello(impl, deadline); err != nil {
+		return nil, err
+	}
+	return impl, nil
+}
+
+func (self *classicDialer) sendDatagramHello(impl *DatagramUnderlay, deadline time.Time) error {
+	log := pfxlog.ContextLogger(impl.Label())
+	defer log.Debug("exited")
+	log.Debug("started")
+
+	request := NewHello(self.identity.Token, self.headers)
+	request.SetSequence(HelloSequence)
+	if err := impl.Tx(request); err != nil {
+		_ = impl.peer.Close()
+		return err
+	}
+
+	if err := impl.peer.SetReadDeadline(deadline); err != nil {
+		return err
+	}
+
+	defer func() {
+		if err := impl.peer.SetReadDeadline(time.Time{}); err != nil { // clear write deadline
+			log.WithError(err).Error("unable to clear read deadline")
+		}
+	}()
+
+	response, err := impl.Rx()
+	if err != nil {
+		if errors.Is(err, BadMagicNumberError) {
+			return fmt.Errorf("could not negotiate connection with %v, invalid header", impl.peer.RemoteAddr().String())
+		}
+		return err
+	}
+	if !response.IsReplyingTo(HelloSequence) || response.ContentType != ContentTypeResultType {
+		return fmt.Errorf("channel synchronization error, expected %v, got %v", HelloSequence, response.ReplyFor())
+	}
+	result := UnmarshalResult(response)
+	if !result.Success {
+		return errors.New(result.Message)
+	}
+	impl.connectionId = string(response.Headers[ConnectionIdHeader])
 	impl.headers = response.Headers
+
+	if id, ok := response.GetStringHeader(IdHeader); ok {
+		impl.id = id
+	} else if certs := impl.Certificates(); len(certs) > 0 {
+		impl.id = certs[0].Subject.CommonName
+	}
 
 	return nil
 }

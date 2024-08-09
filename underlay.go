@@ -1,5 +1,3 @@
-//go:build prototype
-
 /*
 	Copyright NetFoundry Inc.
 
@@ -16,43 +14,42 @@
 	limitations under the License.
 */
 
-package datagram
+package channel
 
 import (
 	"bytes"
 	"crypto/x509"
 	"fmt"
-	"github.com/openziti/channel/v2"
-	"github.com/openziti/foundation/v2/concurrenz"
-	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
+	"net"
+	"sync/atomic"
 	"time"
 )
 
-type Underlay struct {
-	id           *identity.TokenId
+type DatagramUnderlay struct {
+	id           string
 	connectionId string
 	headers      map[int32][]byte
 	peer         transport.Conn
-	closed       concurrenz.AtomicBoolean
+	closed       atomic.Bool
 }
 
-func NewUnderlay(id *identity.TokenId, peer transport.Conn) channel.Underlay {
-	return &Underlay{
+func NewDatagramUnderlay(id string, peer transport.Conn) *DatagramUnderlay {
+	return &DatagramUnderlay{
 		id:   id,
 		peer: peer,
 	}
 }
 
-func (impl *Underlay) GetLocalAddr() net.Addr {
-	return impl.peer.LocalAddr()
+func (self *DatagramUnderlay) GetLocalAddr() net.Addr {
+	return self.peer.LocalAddr()
 }
 
-func (impl *Underlay) GetRemoteAddr() net.Addr {
-	return impl.peer.RemoteAddr()
+func (self *DatagramUnderlay) GetRemoteAddr() net.Addr {
+	return self.peer.RemoteAddr()
 }
 
-func (self *Underlay) Rx() (*channel.Message, error) {
+func (self *DatagramUnderlay) Rx() (*Message, error) {
 	buf := make([]byte, 65000)
 	n, err := self.peer.Read(buf)
 	if err != nil {
@@ -62,11 +59,11 @@ func (self *Underlay) Rx() (*channel.Message, error) {
 	buf = buf[:n]
 
 	reader := bytes.NewBuffer(buf)
-	return channel.ReadV2(reader)
+	return ReadV2(reader)
 }
 
-func (self *Underlay) Tx(m *channel.Message) error {
-	data, err := channel.MarshalV2(m)
+func (self *DatagramUnderlay) Tx(m *Message) error {
+	data, err := MarshalV2(m)
 	if err != nil {
 		return err
 	}
@@ -74,45 +71,45 @@ func (self *Underlay) Tx(m *channel.Message) error {
 	return err
 }
 
-func (self *Underlay) Id() *identity.TokenId {
+func (self *DatagramUnderlay) Id() string {
 	return self.id
 }
 
-func (self *Underlay) LogicalName() string {
+func (self *DatagramUnderlay) LogicalName() string {
 	return "datagram"
 }
 
-func (self *Underlay) ConnectionId() string {
+func (self *DatagramUnderlay) ConnectionId() string {
 	return self.connectionId
 }
 
-func (self *Underlay) Certificates() []*x509.Certificate {
+func (self *DatagramUnderlay) Certificates() []*x509.Certificate {
 	return self.peer.PeerCertificates()
 }
 
-func (self *Underlay) Label() string {
+func (self *DatagramUnderlay) Label() string {
 	return fmt.Sprintf("u{%s}->i{%s}", self.LogicalName(), self.ConnectionId())
 }
 
-func (self *Underlay) Close() error {
+func (self *DatagramUnderlay) Close() error {
 	if self.closed.CompareAndSwap(false, true) {
 		return self.peer.Close()
 	}
 	return nil
 }
 
-func (self *Underlay) IsClosed() bool {
-	return self.closed.Get()
+func (self *DatagramUnderlay) IsClosed() bool {
+	return self.closed.Load()
 }
 
-func (self *Underlay) Headers() map[int32][]byte {
+func (self *DatagramUnderlay) Headers() map[int32][]byte {
 	return self.headers
 }
 
-func (self *Underlay) SetWriteTimeout(duration time.Duration) error {
+func (self *DatagramUnderlay) SetWriteTimeout(duration time.Duration) error {
 	return self.peer.SetWriteDeadline(time.Now().Add(duration))
 }
 
-func (self *Underlay) SetWriteDeadline(deadline time.Time) error {
+func (self *DatagramUnderlay) SetWriteDeadline(deadline time.Time) error {
 	return self.peer.SetWriteDeadline(deadline)
 }
