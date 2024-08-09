@@ -30,18 +30,19 @@ import (
 )
 
 type classicListener struct {
-	identity       *identity.TokenId
-	endpoint       transport.Address
-	socket         io.Closer
-	close          chan struct{}
-	handlers       []ConnectionHandler
-	acceptF        func(underlay Underlay)
-	created        chan Underlay
-	connectOptions ConnectOptions
-	tcfg           transport.Configuration
-	headers        map[int32][]byte
-	closed         atomic.Bool
-	listenerPool   goroutines.Pool
+	identity        *identity.TokenId
+	endpoint        transport.Address
+	socket          io.Closer
+	close           chan struct{}
+	handlers        []ConnectionHandler
+	acceptF         func(underlay Underlay)
+	created         chan Underlay
+	connectOptions  ConnectOptions
+	tcfg            transport.Configuration
+	headers         map[int32][]byte
+	closed          atomic.Bool
+	listenerPool    goroutines.Pool
+	underlayFactory func(peer transport.Conn, version uint32) classicUnderlay
 }
 
 func DefaultListenerConfig() ListenerConfig {
@@ -86,15 +87,21 @@ func newClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 		panic(err)
 	}
 
+	underlayFactory := newClassicImpl
+	if endpoint.Type() == "dtls" {
+		underlayFactory = newDatagramUnderlay
+	}
+
 	return &classicListener{
-		identity:       identity,
-		endpoint:       endpoint,
-		close:          closeNotify,
-		connectOptions: config.ConnectOptions,
-		tcfg:           config.TransportConfig,
-		headers:        config.Headers,
-		listenerPool:   pool,
-		handlers:       config.ConnectionHandlers,
+		identity:        identity,
+		endpoint:        endpoint,
+		close:           closeNotify,
+		connectOptions:  config.ConnectOptions,
+		tcfg:            config.TransportConfig,
+		headers:         config.Headers,
+		listenerPool:    pool,
+		handlers:        config.ConnectionHandlers,
+		underlayFactory: underlayFactory,
 	}
 }
 
@@ -121,77 +128,78 @@ func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 	return listener
 }
 
-func (listener *classicListener) Listen(handlers ...ConnectionHandler) error {
-	listener.handlers = append(listener.handlers, handlers...)
-	socket, err := listener.endpoint.Listen("classic", listener.identity, listener.acceptConnection, listener.tcfg)
+func (self *classicListener) Listen(handlers ...ConnectionHandler) error {
+	self.handlers = append(self.handlers, handlers...)
+	socket, err := self.endpoint.Listen("classic", self.identity, self.acceptConnection, self.tcfg)
 	if err != nil {
 		return err
 	}
-	listener.socket = socket
+	self.socket = socket
 	return nil
 }
 
-func (listener *classicListener) Close() error {
-	if listener.closed.CompareAndSwap(false, true) {
-		close(listener.close)
-		if socket := listener.socket; socket != nil {
+func (self *classicListener) Close() error {
+	if self.closed.CompareAndSwap(false, true) {
+		close(self.close)
+		if socket := self.socket; socket != nil {
 			if err := socket.Close(); err != nil {
 				return err
 			}
 		}
-		listener.socket = nil
+		self.socket = nil
 	}
 	return nil
 }
 
-func (listener *classicListener) Create(_ time.Duration, _ transport.Configuration) (Underlay, error) {
-	if listener.created == nil {
+func (self *classicListener) Create(_ time.Duration, _ transport.Configuration) (Underlay, error) {
+	if self.created == nil {
 		return nil, errors.New("this listener was not set up for Create to be called, programming error")
 	}
 
 	select {
-	case impl := <-listener.created:
+	case impl := <-self.created:
 		if impl != nil {
 			return impl, nil
 		}
-	case <-listener.close:
+	case <-self.close:
 	}
 	return nil, ListenerClosedError
 }
 
-func (listener *classicListener) acceptConnection(peer transport.Conn) {
-	log := pfxlog.ContextLogger(listener.endpoint.String())
-	err := listener.listenerPool.Queue(func() {
-		impl := newClassicImpl(peer, 2)
+func (self *classicListener) acceptConnection(peer transport.Conn) {
+	log := pfxlog.ContextLogger(self.endpoint.String())
+	err := self.listenerPool.Queue(func() {
+		impl := self.underlayFactory(peer, 2)
 
-		var err error
-		impl.connectionId, err = NextConnectionId()
+		connectionId, err := NextConnectionId()
 		if err != nil {
 			_ = peer.Close()
 			log.Errorf("error getting connection id for [%s] (%v)", peer.Detail().Address, err)
 			return
 		}
 
-		if err = peer.SetReadDeadline(time.Now().Add(listener.connectOptions.ConnectTimeout)); err != nil {
-			log.Errorf("could not set read timeout for [%s] (%v)", peer.Detail().Address, err)
+		if err = peer.SetDeadline(time.Now().Add(self.connectOptions.ConnectTimeout)); err != nil {
+			log.Errorf("could not set connection deadline for [%s] (%v)", peer.Detail().Address, err)
 			_ = peer.Close()
 			return
 		}
 
-		request, hello, err := listener.receiveHello(impl)
+		defer func() {
+			if err = peer.SetDeadline(time.Time{}); err != nil {
+				log.Errorf("could not clear connection deadline for [%s] (%v)", peer.Detail().Address, err)
+				_ = peer.Close()
+				return
+			}
+		}()
+
+		request, hello, err := self.receiveHello(impl)
 		if err != nil {
 			_ = peer.Close()
 			log.Errorf("error receiving hello from [%s] (%v)", peer.Detail().Address, err)
 			return
 		}
 
-		if err = peer.SetReadDeadline(time.Time{}); err != nil {
-			log.Errorf("could not clear read timeout for [%s] (%v)", peer.Detail().Address, err)
-			_ = peer.Close()
-			return
-		}
-
-		for _, h := range listener.handlers {
+		for _, h := range self.handlers {
 			if err = h.HandleConnection(hello, peer.PeerCertificates()); err != nil {
 				break
 			}
@@ -203,13 +211,13 @@ func (listener *classicListener) acceptConnection(peer transport.Conn) {
 			return
 		}
 
-		impl.id = &identity.TokenId{Token: hello.IdToken}
-		impl.headers = hello.Headers
+		impl.init(hello.IdToken, connectionId, hello.Headers)
 
-		if err := listener.ackHello(impl, request, true, ""); err == nil {
-			listener.acceptF(impl)
+		if err = self.ackHello(impl, request, true, ""); err == nil {
+			self.acceptF(impl)
 		} else {
 			log.Errorf("error acknowledging hello for [%s] (%v)", peer.Detail().Address, err)
+			_ = peer.Close()
 		}
 	})
 	if err != nil {
@@ -217,15 +225,15 @@ func (listener *classicListener) acceptConnection(peer transport.Conn) {
 	}
 }
 
-func (listener *classicListener) receiveHello(impl *classicImpl) (*Message, *Hello, error) {
+func (self *classicListener) receiveHello(impl classicUnderlay) (*Message, *Hello, error) {
 	log := pfxlog.ContextLogger(impl.Label())
 	log.Debug("started")
 	defer log.Debug("exited")
 
 	request, err := impl.rxHello()
 	if err != nil {
-		if err == BadMagicNumberError {
-			WriteUnknownVersionResponse(impl.peer)
+		if errors.Is(err, BadMagicNumberError) {
+			WriteUnknownVersionResponse(impl.getPeer())
 		}
 		_ = impl.Close()
 		return nil, nil, fmt.Errorf("receive error (%s)", err)
@@ -238,16 +246,16 @@ func (listener *classicListener) receiveHello(impl *classicImpl) (*Message, *Hel
 	return request, hello, nil
 }
 
-func (listener *classicListener) ackHello(impl *classicImpl, request *Message, success bool, message string) error {
+func (self *classicListener) ackHello(impl classicUnderlay, request *Message, success bool, message string) error {
 	response := NewResult(success, message)
 
-	for key, val := range listener.headers {
+	for key, val := range self.headers {
 		response.Headers[key] = val
 	}
 
-	response.PutStringHeader(ConnectionIdHeader, impl.connectionId)
-	if listener.identity != nil {
-		response.PutStringHeader(IdHeader, listener.identity.Token)
+	response.PutStringHeader(ConnectionIdHeader, impl.ConnectionId())
+	if self.identity != nil {
+		response.PutStringHeader(IdHeader, self.identity.Token)
 	}
 	response.sequence = HelloSequence
 

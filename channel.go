@@ -173,6 +173,13 @@ type Underlay interface {
 	GetRemoteAddr() net.Addr
 }
 
+type classicUnderlay interface {
+	Underlay
+	getPeer() transport.Conn
+	init(id string, connectionId string, headers Headers)
+	rxHello() (*Message, error)
+}
+
 const AnyContentType = -1
 const HelloSequence = -1
 
