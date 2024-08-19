@@ -19,7 +19,6 @@ package channel
 import (
 	"crypto/x509"
 	"fmt"
-	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"net"
@@ -29,7 +28,7 @@ import (
 
 type classicImpl struct {
 	peer         transport.Conn
-	id           *identity.TokenId
+	id           string
 	connectionId string
 	headers      map[int32][]byte
 	closed       atomic.Bool
@@ -86,7 +85,7 @@ func (impl *classicImpl) Tx(m *Message) error {
 }
 
 func (impl *classicImpl) Id() string {
-	return impl.id.Token
+	return impl.id
 }
 
 func (impl *classicImpl) Headers() map[int32][]byte {
@@ -120,7 +119,17 @@ func (impl *classicImpl) IsClosed() bool {
 	return impl.closed.Load()
 }
 
-func newClassicImpl(peer transport.Conn, version uint32) *classicImpl {
+func (impl *classicImpl) init(id string, connectionId string, headers Headers) {
+	impl.id = id
+	impl.connectionId = connectionId
+	impl.headers = headers
+}
+
+func (impl *classicImpl) getPeer() transport.Conn {
+	return impl.peer
+}
+
+func newClassicImpl(peer transport.Conn, version uint32) classicUnderlay {
 	readF := ReadV2
 	marshalF := MarshalV2
 
