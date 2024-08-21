@@ -59,6 +59,10 @@ func (self *classicDialer) Create(timeout time.Duration, tcfg transport.Configur
 	log.Debug("started")
 	defer log.Debug("exited")
 
+	if timeout == 0 {
+		timeout = 15 * time.Second
+	}
+
 	deadline := time.Now().Add(timeout)
 
 	version := uint32(2)
