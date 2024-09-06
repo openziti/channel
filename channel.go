@@ -156,7 +156,7 @@ type UnderlayListener interface {
 // UnderlayFactory is used by Channel to obtain an Underlay instance. An underlay "dialer" or "listener" implement
 // UnderlayFactory, to provide instances to Channel.
 type UnderlayFactory interface {
-	Create(timeout time.Duration, tcfg transport.Configuration) (Underlay, error)
+	Create(timeout time.Duration) (Underlay, error)
 }
 
 // Underlay abstracts a physical communications channel, typically sitting on top of 'transport'.

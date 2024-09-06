@@ -18,7 +18,6 @@ package channel
 
 import (
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/transport/v2"
 	"time"
 )
 
@@ -31,7 +30,6 @@ type UnderlayAcceptor interface {
 type UnderlayDispatcherConfig struct {
 	Listener        UnderlayListener
 	ConnectTimeout  time.Duration
-	TransportConfig transport.Configuration
 	Acceptors       map[string]UnderlayAcceptor
 	DefaultAcceptor UnderlayAcceptor
 }
@@ -41,7 +39,6 @@ type UnderlayDispatcherConfig struct {
 type UnderlayDispatcher struct {
 	listener        UnderlayListener
 	connectTimeout  time.Duration
-	transportConfig transport.Configuration
 	acceptors       map[string]UnderlayAcceptor
 	defaultAcceptor UnderlayAcceptor
 }
@@ -50,7 +47,6 @@ func NewUnderlayDispatcher(config UnderlayDispatcherConfig) *UnderlayDispatcher 
 	return &UnderlayDispatcher{
 		listener:        config.Listener,
 		connectTimeout:  config.ConnectTimeout,
-		transportConfig: config.TransportConfig,
 		acceptors:       config.Acceptors,
 		defaultAcceptor: config.DefaultAcceptor,
 	}
@@ -62,7 +58,7 @@ func (self *UnderlayDispatcher) Run() {
 	defer log.Warn("exited")
 
 	for {
-		underlay, err := self.listener.Create(self.connectTimeout, self.transportConfig)
+		underlay, err := self.listener.Create(self.connectTimeout)
 		if err != nil {
 			log.WithError(err).Error("error accepting connection")
 			if err.Error() == "closed" {

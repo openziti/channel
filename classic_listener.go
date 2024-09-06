@@ -42,7 +42,8 @@ type classicListener struct {
 	headers         map[int32][]byte
 	closed          atomic.Bool
 	listenerPool    goroutines.Pool
-	underlayFactory func(peer transport.Conn, version uint32) classicUnderlay
+	messageStrategy MessageStrategy
+	underlayFactory func(messageStrategy MessageStrategy, peer transport.Conn, version uint32) classicUnderlay
 }
 
 func DefaultListenerConfig() ListenerConfig {
@@ -57,6 +58,7 @@ type ListenerConfig struct {
 	TransportConfig    transport.Configuration
 	PoolConfigurator   func(config *goroutines.PoolConfig)
 	ConnectionHandlers []ConnectionHandler
+	MessageStrategy    MessageStrategy
 }
 
 func newClassicListener(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig) *classicListener {
@@ -95,12 +97,17 @@ func newClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 	return &classicListener{
 		identity:        identity,
 		endpoint:        endpoint,
+		socket:          nil,
 		close:           closeNotify,
+		handlers:        config.ConnectionHandlers,
+		acceptF:         nil,
+		created:         nil,
 		connectOptions:  config.ConnectOptions,
 		tcfg:            config.TransportConfig,
 		headers:         config.Headers,
+		closed:          atomic.Bool{},
 		listenerPool:    pool,
-		handlers:        config.ConnectionHandlers,
+		messageStrategy: config.MessageStrategy,
 		underlayFactory: underlayFactory,
 	}
 }
@@ -151,7 +158,7 @@ func (self *classicListener) Close() error {
 	return nil
 }
 
-func (self *classicListener) Create(_ time.Duration, _ transport.Configuration) (Underlay, error) {
+func (self *classicListener) Create(_ time.Duration) (Underlay, error) {
 	if self.created == nil {
 		return nil, errors.New("this listener was not set up for Create to be called, programming error")
 	}
@@ -169,7 +176,7 @@ func (self *classicListener) Create(_ time.Duration, _ transport.Configuration) 
 func (self *classicListener) acceptConnection(peer transport.Conn) {
 	log := pfxlog.ContextLogger(self.endpoint.String())
 	err := self.listenerPool.Queue(func() {
-		impl := self.underlayFactory(peer, 2)
+		impl := self.underlayFactory(self.messageStrategy, peer, 2)
 
 		connectionId, err := NextConnectionId()
 		if err != nil {

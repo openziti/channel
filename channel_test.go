@@ -305,7 +305,7 @@ func TestCloseInBind(t *testing.T) {
 	req.NoError(err)
 
 	clientId := &identity.TokenId{Token: "echo-client"}
-	underlayFactory := NewClassicDialer(clientId, addr, nil)
+	underlayFactory := NewClassicDialer(DialerConfig{Identity: clientId, Endpoint: addr})
 
 	errC := make(chan error, 1)
 
@@ -343,7 +343,7 @@ func dialServer(options *Options, t *testing.T, bindHandler BindHandler) Channel
 	req.NoError(err)
 
 	clientId := &identity.TokenId{Token: "echo-client"}
-	underlayFactory := NewClassicDialer(clientId, addr, nil)
+	underlayFactory := NewClassicDialer(DialerConfig{Identity: clientId, Endpoint: addr})
 
 	ch, err := NewChannel("echo-test", underlayFactory, bindHandler, options)
 	req.NoError(err)

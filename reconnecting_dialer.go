@@ -26,6 +26,15 @@ import (
 	"time"
 )
 
+type ReconnectingDialerConfig struct {
+	Identity         *identity.TokenId
+	Endpoint         transport.Address
+	LocalBinding     string
+	Headers          map[int32][]byte
+	TransportConfig  transport.Configuration
+	ReconnectHandler func()
+}
+
 type reconnectingDialer struct {
 	identity         *identity.TokenId
 	endpoint         transport.Address
@@ -36,39 +45,21 @@ type reconnectingDialer struct {
 	reconnectHandler func()
 }
 
-func NewReconnectingDialer(identity *identity.TokenId, endpoint transport.Address, headers map[int32][]byte) UnderlayFactory {
+func NewReconnectingDialer(config ReconnectingDialerConfig) UnderlayFactory {
 	return &reconnectingDialer{
-		identity: identity,
-		endpoint: endpoint,
-		headers:  headers,
+		identity:         config.Identity,
+		endpoint:         config.Endpoint,
+		headers:          config.Headers,
+		reconnectHandler: config.ReconnectHandler,
+		tcfg:             config.TransportConfig,
+		localBinding:     config.LocalBinding,
 	}
 }
 
-func NewReconnectingDialerWithHandler(identity *identity.TokenId, endpoint transport.Address, headers map[int32][]byte, reconnectHandler func()) UnderlayFactory {
-	return &reconnectingDialer{
-		identity:         identity,
-		endpoint:         endpoint,
-		headers:          headers,
-		reconnectHandler: reconnectHandler,
-	}
-}
-
-func NewReconnectingDialerWithHandlerAndLocalBinding(identity *identity.TokenId, endpoint transport.Address, localBinding string, headers map[int32][]byte, reconnectHandler func()) UnderlayFactory {
-	return &reconnectingDialer{
-		identity:         identity,
-		endpoint:         endpoint,
-		localBinding:     localBinding,
-		headers:          headers,
-		reconnectHandler: reconnectHandler,
-	}
-}
-
-func (dialer *reconnectingDialer) Create(timeout time.Duration, tcfg transport.Configuration) (Underlay, error) {
+func (dialer *reconnectingDialer) Create(timeout time.Duration) (Underlay, error) {
 	log := pfxlog.ContextLogger(dialer.endpoint.String())
 	log.Debug("started")
 	defer log.Debug("exited")
-
-	dialer.tcfg = tcfg
 
 	version := uint32(2)
 

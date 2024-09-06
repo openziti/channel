@@ -26,17 +26,42 @@ import (
 	"time"
 )
 
+type readPacketFunction func(buf []byte) (*Message, error)
+
 type DatagramUnderlay struct {
 	id           string
 	connectionId string
 	headers      map[int32][]byte
 	peer         transport.Conn
 	closed       atomic.Bool
+	readF        readPacketFunction
+	marshalF     marshalFunction
 }
 
-func newDatagramUnderlay(peer transport.Conn, _ uint32) classicUnderlay {
+func newDatagramUnderlay(messageStrategy MessageStrategy, peer transport.Conn, version uint32) classicUnderlay {
+	readF := func(buf []byte) (*Message, error) {
+		reader := bytes.NewBuffer(buf)
+		return ReadV2(reader)
+	}
+
+	marshalF := MarshalV2
+
+	if version == 3 { // currently only used for testing fallback to a common protocol version
+		marshalF = marshalV3
+	}
+
+	if messageStrategy != nil && messageStrategy.GetPacketProducer() != nil {
+		readF = messageStrategy.GetPacketProducer()
+	}
+
+	if messageStrategy != nil && messageStrategy.GetMarshaller() != nil {
+		marshalF = messageStrategy.GetMarshaller()
+	}
+
 	return &DatagramUnderlay{
-		peer: peer,
+		peer:     peer,
+		readF:    readF,
+		marshalF: marshalF,
 	}
 }
 
@@ -49,20 +74,18 @@ func (self *DatagramUnderlay) GetRemoteAddr() net.Addr {
 }
 
 func (self *DatagramUnderlay) Rx() (*Message, error) {
-	buf := make([]byte, 65000)
+	buf := make([]byte, 2000)
 	n, err := self.peer.Read(buf)
 	if err != nil {
 		return nil, err
 	}
 
 	buf = buf[:n]
-
-	reader := bytes.NewBuffer(buf)
-	return ReadV2(reader)
+	return self.readF(buf)
 }
 
 func (self *DatagramUnderlay) Tx(m *Message) error {
-	data, err := MarshalV2(m)
+	data, err := self.marshalF(m)
 	if err != nil {
 		return err
 	}
@@ -125,4 +148,18 @@ func (impl *DatagramUnderlay) getPeer() transport.Conn {
 
 func (self *DatagramUnderlay) rxHello() (*Message, error) {
 	return self.Rx()
+}
+
+type DatagramMessageStrategy PacketMessageProducer
+
+func (self DatagramMessageStrategy) GetMarshaller() MessageMarshaller {
+	return MarshalV2WithRaw
+}
+
+func (self DatagramMessageStrategy) GetStreamProducer() StreamMessageProducer {
+	return nil
+}
+
+func (self DatagramMessageStrategy) GetPacketProducer() PacketMessageProducer {
+	return PacketMessageProducer(self)
 }

@@ -129,16 +129,20 @@ func (impl *classicImpl) getPeer() transport.Conn {
 	return impl.peer
 }
 
-func newClassicImpl(peer transport.Conn, version uint32) classicUnderlay {
+func newClassicImpl(messageStrategy MessageStrategy, peer transport.Conn, version uint32) classicUnderlay {
 	readF := ReadV2
 	marshalF := MarshalV2
 
-	if version == 2 {
-		readF = ReadV2
-		marshalF = MarshalV2
-	} else if version == 3 { // currently only used for testing fallback to a common protocol version
-		readF = ReadV2
+	if version == 3 { // currently only used for testing fallback to a common protocol version
 		marshalF = marshalV3
+	}
+
+	if messageStrategy != nil && messageStrategy.GetStreamProducer() != nil {
+		readF = messageStrategy.GetStreamProducer()
+	}
+
+	if messageStrategy != nil && messageStrategy.GetMarshaller() != nil {
+		marshalF = messageStrategy.GetMarshaller()
 	}
 
 	return &classicImpl{

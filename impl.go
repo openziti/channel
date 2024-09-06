@@ -24,7 +24,6 @@ import (
 	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/foundation/v2/info"
 	"github.com/openziti/foundation/v2/sequence"
-	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"io"
 	"net"
@@ -67,16 +66,12 @@ type channelImpl struct {
 }
 
 func NewChannel(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options) (Channel, error) {
-	return NewChannelWithTransportConfiguration(logicalName, underlayFactory, bindHandler, options, nil)
-}
-
-func NewChannelWithTransportConfiguration(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options, tcfg transport.Configuration) (Channel, error) {
 	timeout := time.Duration(0)
 	if options != nil {
 		timeout = options.ConnectTimeout
 	}
 
-	underlay, err := underlayFactory.Create(timeout, tcfg)
+	underlay, err := underlayFactory.Create(timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -117,8 +112,8 @@ func NewChannelWithUnderlay(logicalName string, underlay Underlay, bindHandler B
 	return impl, nil
 }
 
-func AcceptNextChannel(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options, tcfg transport.Configuration) error {
-	underlay, err := underlayFactory.Create(options.ConnectTimeout, tcfg)
+func AcceptNextChannel(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options) error {
+	underlay, err := underlayFactory.Create(options.ConnectTimeout)
 	if err != nil {
 		return err
 	}

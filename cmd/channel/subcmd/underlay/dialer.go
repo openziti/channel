@@ -19,7 +19,7 @@ package underlay
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v2"
+	"github.com/openziti/channel/v3"
 	"github.com/openziti/identity/dotziti"
 	"github.com/openziti/transport/v2"
 	"github.com/spf13/cobra"
@@ -63,9 +63,12 @@ func runDialer(_ *cobra.Command, _ []string) {
 	var dialer channel.UnderlayFactory
 	switch dialerUnderlay {
 	case "classic":
-		dialer = channel.NewClassicDialer(id, endpoint, nil)
+		dialer = channel.NewClassicDialer(channel.DialerConfig{
+			Identity: id,
+			Endpoint: endpoint,
+		})
 	case "reconnecting":
-		dialer = channel.NewReconnectingDialer(id, endpoint, nil)
+		dialer = channel.NewReconnectingDialer(channel.ReconnectingDialerConfig{Identity: id, Endpoint: endpoint})
 	default:
 		panic(fmt.Errorf("unknown underlay [%s]", dialerUnderlay))
 	}

@@ -23,6 +23,7 @@ const (
 	ContentTypeLatencyType         = 3
 	ContentTypeLatencyResponseType = 4
 	ContentTypeHeartbeat           = 5
+	ContentTypeRaw                 = 6
 )
 
 type Hello struct {

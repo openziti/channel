@@ -20,9 +20,8 @@ import (
 	"bytes"
 	"crypto/x509"
 	"github.com/gorilla/websocket"
-	"github.com/openziti/channel/v2"
+	"github.com/openziti/channel/v3"
 	"github.com/openziti/identity"
-	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"net"
 	"sync/atomic"
@@ -51,7 +50,7 @@ func (impl *Underlay) GetLocalAddr() net.Addr {
 func (impl *Underlay) GetRemoteAddr() net.Addr {
 	return impl.peer.RemoteAddr()
 }
-func (self *Underlay) Create(time.Duration, transport.Configuration) (channel.Underlay, error) {
+func (self *Underlay) Create(time.Duration) (channel.Underlay, error) {
 	return self, nil
 }
 

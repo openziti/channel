@@ -1,4 +1,4 @@
-module github.com/openziti/channel/v2
+module github.com/openziti/channel/v3
 
 go 1.21
 
