@@ -1,10 +1,11 @@
 module github.com/openziti/channel/v3
 
 go 1.21
+toolchain go1.22.5
 
 require (
 	github.com/gorilla/websocket v1.5.1
-	github.com/michaelquigley/pfxlog v0.6.10
+	github.com/michaelquigley/pfxlog v1.0.0
 	github.com/openziti/foundation/v2 v2.0.48
 	github.com/openziti/identity v1.0.84
 	github.com/openziti/transport/v2 v2.0.143
