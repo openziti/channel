@@ -18,9 +18,9 @@ package underlay
 
 import (
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v2"
-	"github.com/openziti/channel/v2/cmd/channel/subcmd"
-	"github.com/openziti/channel/v2/memory"
+	"github.com/openziti/channel/v3"
+	"github.com/openziti/channel/v3/cmd/channel/subcmd"
+	"github.com/openziti/channel/v3/memory"
 	"github.com/openziti/identity"
 	"github.com/openziti/identity/dotziti"
 	"github.com/spf13/cobra"

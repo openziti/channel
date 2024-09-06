@@ -929,3 +929,10 @@ func DecodeStringToStringMap(b []byte) (map[string]string, error) {
 
 	return result, nil
 }
+
+func MarshalV2WithRaw(m *Message) ([]byte, error) {
+	if m.ContentType == ContentTypeRaw {
+		return m.Body, nil
+	}
+	return MarshalV2(m)
+}

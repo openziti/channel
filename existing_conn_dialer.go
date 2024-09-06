@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/identity"
-	"github.com/openziti/transport/v2"
 	"net"
 	"time"
 )
@@ -40,7 +39,7 @@ func NewExistingConnDialer(id *identity.TokenId, peer net.Conn, headers map[int3
 	}
 }
 
-func (self *existingConnDialer) Create(timeout time.Duration, _ transport.Configuration) (Underlay, error) {
+func (self *existingConnDialer) Create(timeout time.Duration) (Underlay, error) {
 	log := pfxlog.Logger()
 	log.Debug("started")
 	defer log.Debug("exited")

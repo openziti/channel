@@ -2,7 +2,7 @@ package channel_test
 
 import (
 	"fmt"
-	"github.com/openziti/channel/v2"
+	"github.com/openziti/channel/v3"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2/tcp"
 	"time"
@@ -14,7 +14,7 @@ func Example() {
 		panic(err)
 	}
 	dialId := &identity.TokenId{Token: "echo-client"}
-	underlayFactory := channel.NewClassicDialer(dialId, addr, nil)
+	underlayFactory := channel.NewClassicDialer(channel.DialerConfig{Identity: dialId, Endpoint: addr})
 
 	ch, err := channel.NewChannel("echo-test", underlayFactory, nil, nil)
 	if err != nil {

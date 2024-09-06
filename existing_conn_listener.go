@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/identity"
-	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
 	"net"
 	"time"
@@ -40,7 +39,7 @@ func NewExistingConnListener(identity *identity.TokenId, peer net.Conn, headers 
 	}
 }
 
-func (self *existingConnListener) Create(timeout time.Duration, _ transport.Configuration) (Underlay, error) {
+func (self *existingConnListener) Create(timeout time.Duration) (Underlay, error) {
 	log := pfxlog.Logger()
 
 	impl := newExistingImpl(self.peer, 2)

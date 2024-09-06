@@ -30,18 +30,30 @@ type classicDialer struct {
 	endpoint        transport.Address
 	localBinding    string
 	headers         map[int32][]byte
-	underlayFactory func(peer transport.Conn, version uint32) classicUnderlay
+	underlayFactory func(messageStrategy MessageStrategy, peer transport.Conn, version uint32) classicUnderlay
+	messageStrategy MessageStrategy
+	transportConfig transport.Configuration
 }
 
-func NewClassicDialerWithBindAddress(identity *identity.TokenId, endpoint transport.Address, localBinding string, headers map[int32][]byte) UnderlayFactory {
+type DialerConfig struct {
+	Identity        *identity.TokenId
+	Endpoint        transport.Address
+	LocalBinding    string
+	Headers         map[int32][]byte
+	MessageStrategy MessageStrategy
+	TransportConfig transport.Configuration
+}
+
+func NewClassicDialer(cfg DialerConfig) UnderlayFactory {
 	result := &classicDialer{
-		identity:     identity,
-		endpoint:     endpoint,
-		localBinding: localBinding,
-		headers:      headers,
+		identity:        cfg.Identity,
+		endpoint:        cfg.Endpoint,
+		localBinding:    cfg.LocalBinding,
+		headers:         cfg.Headers,
+		messageStrategy: cfg.MessageStrategy,
 	}
 
-	if endpoint.Type() == "dtls" {
+	if cfg.Endpoint.Type() == "dtls" {
 		result.underlayFactory = newDatagramUnderlay
 	} else {
 		result.underlayFactory = newClassicImpl
@@ -50,11 +62,7 @@ func NewClassicDialerWithBindAddress(identity *identity.TokenId, endpoint transp
 	return result
 }
 
-func NewClassicDialer(identity *identity.TokenId, endpoint transport.Address, headers map[int32][]byte) UnderlayFactory {
-	return NewClassicDialerWithBindAddress(identity, endpoint, "", headers)
-}
-
-func (self *classicDialer) Create(timeout time.Duration, tcfg transport.Configuration) (Underlay, error) {
+func (self *classicDialer) Create(timeout time.Duration) (Underlay, error) {
 	log := pfxlog.ContextLogger(self.endpoint.String())
 	log.Debug("started")
 	defer log.Debug("exited")
@@ -71,12 +79,12 @@ func (self *classicDialer) Create(timeout time.Duration, tcfg transport.Configur
 	log.Debugf("Attempting to dial with bind: %s", self.localBinding)
 
 	for time.Now().Before(deadline) {
-		peer, err := self.endpoint.DialWithLocalBinding("classic", self.localBinding, self.identity, timeout, tcfg)
+		peer, err := self.endpoint.DialWithLocalBinding("classic", self.localBinding, self.identity, timeout, self.transportConfig)
 		if err != nil {
 			return nil, err
 		}
 
-		underlay := self.underlayFactory(peer, version)
+		underlay := self.underlayFactory(self.messageStrategy, peer, version)
 		if err = self.sendHello(underlay, deadline); err != nil {
 			if tryCount > 0 {
 				return nil, err

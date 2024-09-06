@@ -20,14 +20,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pkg/errors"
+	"io"
 	"time"
 )
+
+type MessageStrategy interface {
+	GetMarshaller() MessageMarshaller
+	GetStreamProducer() StreamMessageProducer
+	GetPacketProducer() PacketMessageProducer
+}
+
+type MessageMarshaller func(m *Message) ([]byte, error)
+type StreamMessageProducer func(r io.Reader) (*Message, error)
+type PacketMessageProducer func(b []byte) (*Message, error)
 
 type Options struct {
 	OutQueueSize int
 	ConnectOptions
-	DelayRxStart bool
-	WriteTimeout time.Duration
+	DelayRxStart    bool
+	WriteTimeout    time.Duration
+	MessageStrategy MessageStrategy
 }
 
 func DefaultOptions() *Options {

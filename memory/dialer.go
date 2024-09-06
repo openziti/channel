@@ -19,9 +19,8 @@ package memory
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v2"
+	"github.com/openziti/channel/v3"
 	"github.com/openziti/identity"
-	"github.com/openziti/transport/v2"
 	"time"
 )
 
@@ -39,7 +38,7 @@ func NewMemoryDialer(identity *identity.TokenId, headers map[int32][]byte, ctx *
 	}
 }
 
-func (dialer *memoryDialer) Create(_ time.Duration, _ transport.Configuration) (channel.Underlay, error) {
+func (dialer *memoryDialer) Create(time.Duration) (channel.Underlay, error) {
 	log := pfxlog.ContextLogger(fmt.Sprintf("%p", dialer.ctx))
 	log.Info("started")
 	defer log.Info("exited")

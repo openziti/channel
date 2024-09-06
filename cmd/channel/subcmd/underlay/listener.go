@@ -19,7 +19,7 @@ package underlay
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v2"
+	"github.com/openziti/channel/v3"
 	"github.com/openziti/identity/dotziti"
 	"github.com/openziti/transport/v2"
 	"github.com/spf13/cobra"

@@ -19,9 +19,8 @@ package memory
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v2"
+	"github.com/openziti/channel/v3"
 	"github.com/openziti/identity"
-	"github.com/openziti/transport/v2"
 	"time"
 )
 
@@ -50,7 +49,7 @@ func (listener *memoryListener) Close() error {
 	return nil
 }
 
-func (listener *memoryListener) Create(_ time.Duration, _ transport.Configuration) (channel.Underlay, error) {
+func (listener *memoryListener) Create(_ time.Duration) (channel.Underlay, error) {
 	impl := <-listener.created
 	if impl == nil {
 		return nil, channel.ListenerClosedError
