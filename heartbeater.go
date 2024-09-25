@@ -135,6 +135,9 @@ func (self *heartbeater) Rx(m *Message, _ Channel) {
 }
 
 func (self *heartbeater) Tx(m *Message, _ Channel) {
+	if m.ContentType == ContentTypeRaw {
+		return
+	}
 	now := time.Now().UnixNano()
 	if now-self.lastHeartbeatTx > self.heartBeatIntervalNs {
 		m.PutUint64Header(HeartbeatHeader, uint64(now))
