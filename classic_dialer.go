@@ -51,6 +51,7 @@ func NewClassicDialer(cfg DialerConfig) UnderlayFactory {
 		localBinding:    cfg.LocalBinding,
 		headers:         cfg.Headers,
 		messageStrategy: cfg.MessageStrategy,
+		transportConfig: cfg.TransportConfig,
 	}
 
 	if cfg.Endpoint.Type() == "dtls" {
