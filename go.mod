@@ -5,9 +5,9 @@ go 1.21
 require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/michaelquigley/pfxlog v0.6.10
-	github.com/openziti/foundation/v2 v2.0.51
-	github.com/openziti/identity v1.0.89
-	github.com/openziti/transport/v2 v2.0.152
+	github.com/openziti/foundation/v2 v2.0.52
+	github.com/openziti/identity v1.0.90
+	github.com/openziti/transport/v2 v2.0.153
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.8.1
