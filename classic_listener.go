@@ -40,6 +40,7 @@ type classicListener struct {
 	connectOptions  ConnectOptions
 	tcfg            transport.Configuration
 	headers         map[int32][]byte
+	headersF        func() map[int32][]byte
 	closed          atomic.Bool
 	listenerPool    goroutines.Pool
 	messageStrategy MessageStrategy
@@ -55,6 +56,7 @@ func DefaultListenerConfig() ListenerConfig {
 type ListenerConfig struct {
 	ConnectOptions
 	Headers            map[int32][]byte
+	HeadersF           func() map[int32][]byte
 	TransportConfig    transport.Configuration
 	PoolConfigurator   func(config *goroutines.PoolConfig)
 	ConnectionHandlers []ConnectionHandler
@@ -105,6 +107,7 @@ func newClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 		connectOptions:  config.ConnectOptions,
 		tcfg:            config.TransportConfig,
 		headers:         config.Headers,
+		headersF:        config.HeadersF,
 		closed:          atomic.Bool{},
 		listenerPool:    pool,
 		messageStrategy: config.MessageStrategy,
@@ -258,6 +261,12 @@ func (self *classicListener) ackHello(impl classicUnderlay, request *Message, su
 
 	for key, val := range self.headers {
 		response.Headers[key] = val
+	}
+
+	if self.headersF != nil {
+		for key, val := range self.headersF() {
+			response.Headers[key] = val
+		}
 	}
 
 	response.PutStringHeader(ConnectionIdHeader, impl.ConnectionId())
