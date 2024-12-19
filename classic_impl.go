@@ -105,7 +105,7 @@ func (impl *classicImpl) Certificates() []*x509.Certificate {
 }
 
 func (impl *classicImpl) Label() string {
-	return fmt.Sprintf("u{%s}->i{%s}", impl.LogicalName(), impl.ConnectionId())
+	return fmt.Sprintf("u{%s}->i{%s/%s}", impl.LogicalName(), impl.id, impl.ConnectionId())
 }
 
 func (impl *classicImpl) Close() error {
