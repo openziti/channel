@@ -165,8 +165,6 @@ func (dialer *reconnectingDialer) sendHello(impl *reconnectingImpl) error {
 
 	if id, ok := response.GetStringHeader(IdHeader); ok {
 		impl.id = &identity.TokenId{Token: id}
-	} else if certs := impl.Certificates(); len(certs) > 0 {
-		impl.id = &identity.TokenId{Token: certs[0].Subject.CommonName}
 	}
 
 	impl.headers.Store(response.Headers)

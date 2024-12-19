@@ -107,7 +107,7 @@ func (impl *reconnectingImpl) Certificates() []*x509.Certificate {
 }
 
 func (impl *reconnectingImpl) Label() string {
-	return fmt.Sprintf("u{%s}->i{%s}", impl.LogicalName(), impl.ConnectionId())
+	return fmt.Sprintf("u{%s}->i{%s/%s}", impl.LogicalName(), impl.id.Token, impl.ConnectionId())
 }
 
 func (impl *reconnectingImpl) Close() error {
@@ -122,7 +122,13 @@ func (impl *reconnectingImpl) IsClosed() bool {
 }
 
 func newReconnectingImpl(peer transport.Conn, reconnectionHandler reconnectionHandler, timeout time.Duration) *reconnectingImpl {
+	id := &identity.TokenId{Token: "unknown"}
+	if certs := peer.PeerCertificates(); len(certs) > 0 {
+		id = &identity.TokenId{Token: certs[0].Subject.CommonName}
+	}
+
 	return &reconnectingImpl{
+		id:                  id,
 		peer:                peer,
 		reconnectionHandler: reconnectionHandler,
 		readF:               ReadV2,
