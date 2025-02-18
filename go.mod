@@ -7,7 +7,7 @@ require (
 	github.com/michaelquigley/pfxlog v0.6.10
 	github.com/openziti/foundation/v2 v2.0.57
 	github.com/openziti/identity v1.0.98
-	github.com/openziti/transport/v2 v2.0.162
+	github.com/openziti/transport/v2 v2.0.163
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.8.1
