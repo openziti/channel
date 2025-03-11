@@ -1,52 +1,107 @@
 package channel
 
 import (
+	"github.com/openziti/identity"
+	"github.com/openziti/transport/v2"
+	"github.com/stretchr/testify/require"
 	"io"
-	"time"
+	"testing"
 )
 
-type EdgeChannel struct {
-	id         string
-	ctrlSender Sender
-	dataSender Sender
-	ctrlC      chan Sendable
-	retryC     chan Sendable
-	dataC      chan Sendable
+func Test_MultiUnderlayChannels(t *testing.T) {
+	req := require.New(t)
+	listenAddr, err := transport.ParseAddress("tcp:0.0.0.0:6767")
+	req.NoError(err)
 
-	ch          *multiChannelImpl
-	dialer      *classicDialer
-	dialTimeout time.Duration
+	multiListener := NewMultiListener(func(underlay Underlay) (MultiChannel, error) {
+		multiConfig := MultiChannelConfig{
+			LogicalName:     "test",
+			DefaultSender:   nil,
+			Options:         DefaultOptions(),
+			UnderlayHandler: nil,
+			BindHandler:     nil,
+			Underlay:        underlay,
+		}
+		return NewMultiChannel(&multiConfig)
+	})
+
+	listener, err := NewClassicListenerF(&identity.TokenId{Token: "host"}, listenAddr, ListenerConfig{}, multiListener.AcceptUnderlay)
+	req.NoError(err)
+	defer func() { _ = listener.Close() }()
 }
 
-type EdgeUnderlayHandler struct {
-	ctrlMsgChan  <-chan Sendable
-	dataMsgChan  <-chan Sendable
-	retryMsgChan chan Sendable
-	dialer       *classicDialer
+func NewListenerSidePriorityChannel(id string) {
+	NewSingleChSender()
 }
 
-func (self *EdgeUnderlayHandler) Start(channel MultiChannel) {
+type priorityChannelBase struct {
+	id             string
+	prioritySender Sender
+	defaultSender  Sender
+
+	priorityMsgChan chan Sendable
+	defaultMsgChan  chan Sendable
+	retryMsgChan    chan Sendable
+}
+
+func (self *priorityChannelBase) GetDefaultSender() Sender {
+	return self.defaultSender
+}
+
+func (self *priorityChannelBase) GetPrioritySender() Sender {
+	return self.prioritySender
+}
+
+func (self *priorityChannelBase) GetNextMsgDefault(closeNotify <-chan struct{}) (Sendable, error) {
+	select {
+	case msg := <-self.priorityMsgChan:
+		return msg, nil
+	case msg := <-self.defaultMsgChan:
+		return msg, nil
+	case msg := <-self.retryMsgChan:
+		return msg, nil
+	case <-closeNotify:
+		return nil, io.EOF
+	}
+}
+
+func (self *priorityChannelBase) GetNextPriorityMsg(closeNotify <-chan struct{}) (Sendable, error) {
+	select {
+	case msg := <-self.priorityMsgChan:
+		return msg, nil
+	case msg := <-self.retryMsgChan:
+		return msg, nil
+	case <-closeNotify:
+		return nil, io.EOF
+	}
+}
+
+func (self *priorityChannelBase) GetMessageSource(underlay Underlay) MessageSourceF {
+	if GetUnderlayType(underlay) == "priority" {
+		return self.GetNextPriorityMsg
+	}
+	return self.GetNextMsgDefault
+}
+
+func (self *priorityChannelBase) TxFailed(underlay Underlay, sendable Sendable) {
+	select {
+	case self.retryMsgChan <- sendable:
+	default:
+	}
+}
+
+type dialPriorityChannel struct {
+	priorityChannelBase
+
+	dialer *classicDialer
+	dialF  func(id string)
+}
+
+func (self *dialPriorityChannel) Start(channel MultiChannel) {
 	counts := channel.GetUnderlayCountsByType()
 }
 
-func (self *EdgeUnderlayHandler) GetMessageSource(underlay Underlay) MessageSourceF {
-	if GetUnderlayType(underlay) == "edge.data" {
-		return self.GetNextMsgDefault
-	}
-	return self.GetNextCtrlMsg
-}
-
-func (self *EdgeUnderlayHandler) TxFailed(underlay Underlay, sendable Sendable) {
-	msg := sendable.Msg()
-	if msg != nil && msg.ContentType != 10 {
-		select {
-		case self.retryMsgChan <- sendable:
-		default:
-		}
-	}
-}
-
-func (self *EdgeUnderlayHandler) HandleClose(channel MultiChannel, underlay Underlay) {
+func (self *dialPriorityChannel) HandleClose(channel MultiChannel, underlay Underlay) {
 	underlayType := GetUnderlayType(underlay)
 	if GetUnderlayType(underlay) == "edge.data" {
 		_ = channel.Close()
@@ -55,14 +110,14 @@ func (self *EdgeUnderlayHandler) HandleClose(channel MultiChannel, underlay Unde
 	}
 }
 
-func (self *EdgeUnderlayHandler) Init(channel MultiChannel) ([]Underlay, error) {
+func (self *priorityChannelBase) Dial(channel MultiChannel, underlayType string) {
 	dialTimeout := channel.GetOptions().ConnectTimeout
 	if dialTimeout == 0 {
 		dialTimeout = DefaultConnectTimeout
 	}
 
 	underlay, err := self.dialer.CreateWithHeaders(dialTimeout, map[int32][]byte{
-		TypeHeader:         []byte("edge.data"),
+		TypeHeader:         []byte(underlayType),
 		ConnectionIdHeader: []byte(channel.ConnectionId()),
 	})
 	if err != nil {
@@ -70,28 +125,4 @@ func (self *EdgeUnderlayHandler) Init(channel MultiChannel) ([]Underlay, error) 
 	}
 
 	return []Underlay{underlay}, nil
-}
-
-func (self *EdgeUnderlayHandler) GetNextMsgDefault(closeNotify <-chan struct{}) (Sendable, error) {
-	select {
-	case msg := <-self.ctrlMsgChan:
-		return msg, nil
-	case msg := <-self.dataMsgChan:
-		return msg, nil
-	case msg := <-self.retryMsgChan:
-		return msg, nil
-	case <-closeNotify:
-		return nil, io.EOF
-	}
-}
-
-func (self *EdgeUnderlayHandler) GetNextCtrlMsg(closeNotify <-chan struct{}) (Sendable, error) {
-	select {
-	case msg := <-self.ctrlMsgChan:
-		return msg, nil
-	case msg := <-self.retryMsgChan:
-		return msg, nil
-	case <-closeNotify:
-		return nil, io.EOF
-	}
 }

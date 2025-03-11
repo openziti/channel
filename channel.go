@@ -165,6 +165,10 @@ type UnderlayFactory interface {
 	Create(timeout time.Duration) (Underlay, error)
 }
 
+type GroupedUnderlayFactory interface {
+	Create(groupId string, underlayType string, timeout time.Duration) (Underlay, error)
+}
+
 // Underlay abstracts a physical communications channel, typically sitting on top of 'transport'.
 type Underlay interface {
 	Rx() (*Message, error)

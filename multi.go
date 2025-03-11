@@ -18,14 +18,13 @@ package channel
 
 import (
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/concurrenz"
-	"github.com/openziti/foundation/v2/errorz"
 	"github.com/openziti/foundation/v2/info"
 	"github.com/openziti/foundation/v2/sequence"
-	"github.com/pkg/errors"
 	"io"
 	"net"
 	"sync"
@@ -245,7 +244,7 @@ func (self *multiChannelImpl) Close() error {
 			}
 		}
 
-		return errorz.ErrorListToError(errs)
+		return errors.Join(errs...)
 	}
 
 	return nil
@@ -377,7 +376,7 @@ func (self *multiChannelImpl) CloseUnderlay(underlay Underlay) {
 	self.lock.Unlock()
 
 	if underlayRemoved {
-		self.underlayHandler.HandleClose(underlay)
+		self.underlayHandler.HandleClose(self, underlay)
 	}
 }
 
@@ -436,6 +435,24 @@ func (self *multiChannelImpl) Rxer(underlay Underlay) {
 		}
 
 		self.Rx(m)
+	}
+}
+
+func (self *multiChannelImpl) DefaultDial(factory GroupedUnderlayFactory, underlayType string) (Underlay, error) {
+	for {
+		if self.IsClosed() {
+			return nil, errors.New("unable to dial, channel is closed")
+		}
+
+		dialTimeout := self.GetOptions().ConnectTimeout
+		if dialTimeout == 0 {
+			dialTimeout = DefaultConnectTimeout
+		}
+
+		underlay, err := factory.Create(self.ConnectionId(), underlayType, dialTimeout)
+		if err == nil {
+			return underlay, nil
+		}
 	}
 }
 
