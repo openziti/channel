@@ -131,3 +131,12 @@ type CloseHandlerF func(ch Channel)
 func (self CloseHandlerF) HandleClose(ch Channel) {
 	self(ch)
 }
+
+type MessageSourceF func(closeNotify <-chan struct{}) (Sendable, error)
+
+type UnderlayHandler interface {
+	Start(channel MultiChannel)
+	GetMessageSource(underlay Underlay) MessageSourceF
+	TxFailed(underlay Underlay, sendable Sendable)
+	HandleClose(channel MultiChannel, underlay Underlay)
+}

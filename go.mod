@@ -1,10 +1,12 @@
-module github.com/openziti/channel/v3
+module github.com/openziti/channel/v4
 
 go 1.21
 
 require (
+	github.com/google/uuid v1.1.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/michaelquigley/pfxlog v0.6.10
+	github.com/openziti/channel/v3 v3.0.37
 	github.com/openziti/foundation/v2 v2.0.58
 	github.com/openziti/identity v1.0.100
 	github.com/openziti/transport/v2 v2.0.165

@@ -34,8 +34,14 @@ type Channel interface {
 	io.Closer
 	IsClosed() bool
 	Underlay() Underlay
-	StartRx()
 	GetTimeSinceLastRead() time.Duration
+}
+
+type MultiChannel interface {
+	Channel
+	GetOptions() *Options
+	AcceptUnderlay(underlay Underlay) bool
+	GetUnderlayCountsByType() map[string]int
 }
 
 type Sender interface {
