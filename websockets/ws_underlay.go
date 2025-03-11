@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"crypto/x509"
 	"github.com/gorilla/websocket"
-	"github.com/openziti/channel/v3"
+	"github.com/openziti/channel/v4"
 	"github.com/openziti/identity"
 	"github.com/pkg/errors"
 	"net"

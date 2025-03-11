@@ -1,7 +1,7 @@
 package protobufs
 
 import (
-	"github.com/openziti/channel/v3"
+	"github.com/openziti/channel/v4"
 	"github.com/pkg/errors"
 	"google.golang.org/protobuf/proto"
 	"reflect"

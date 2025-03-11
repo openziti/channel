@@ -63,6 +63,7 @@ type channelImpl struct {
 	errorHandlers     []ErrorHandler
 	closeHandlers     []CloseHandler
 	userData          interface{}
+	replyCounter      uint32
 }
 
 func NewChannel(logicalName string, underlayFactory UnderlayFactory, bindHandler BindHandler, options *Options) (Channel, error) {
@@ -146,6 +147,10 @@ func (channel *channelImpl) ConnectionId() string {
 
 func (channel *channelImpl) Certificates() []*x509.Certificate {
 	return channel.underlay.Certificates()
+}
+
+func (channel *channelImpl) Headers() map[int32][]byte {
+	return channel.underlay.Headers()
 }
 
 func (channel *channelImpl) Label() string {
@@ -279,14 +284,8 @@ func (channel *channelImpl) startMultiplex() {
 		peekHandler.Connect(channel, "")
 	}
 
-	if channel.options == nil || !channel.options.DelayRxStart {
-		go channel.rxer()
-	}
-	go channel.txer()
-}
-
-func (channel *channelImpl) StartRx() {
 	go channel.rxer()
+	go channel.txer()
 }
 
 func (channel *channelImpl) rxer() {
@@ -307,8 +306,6 @@ func (channel *channelImpl) rxer() {
 
 	defer channel.waiters.clear()
 
-	var replyCounter uint32
-
 	for {
 		m, err := channel.underlay.Rx()
 		if err != nil {
@@ -321,43 +318,48 @@ func (channel *channelImpl) rxer() {
 			}
 			return
 		}
+		channel.rx(m)
+	}
+}
 
-		now := info.NowInMilliseconds()
-		atomic.StoreInt64(&channel.lastRead, now)
+func (channel *channelImpl) rx(m *Message) {
+	log := pfxlog.ContextLogger(channel.Label())
 
-		for _, transformHandler := range channel.transformHandlers {
-			transformHandler.Rx(m, channel)
+	now := info.NowInMilliseconds()
+	atomic.StoreInt64(&channel.lastRead, now)
+
+	for _, transformHandler := range channel.transformHandlers {
+		transformHandler.Rx(m, channel)
+	}
+
+	for _, peekHandler := range channel.peekHandlers {
+		peekHandler.Rx(m, channel)
+	}
+
+	handled := false
+	if m.IsReply() {
+		channel.replyCounter++
+		if channel.replyCounter%100 == 0 && channel.waiters.Size() > 1000 {
+			channel.waiters.reapExpired(now)
 		}
-
-		for _, peekHandler := range channel.peekHandlers {
-			peekHandler.Rx(m, channel)
+		replyFor := m.ReplyFor()
+		if replyReceiver := channel.waiters.RemoveWaiter(replyFor); replyReceiver != nil {
+			log.Tracef("waiter found for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
+			replyReceiver.AcceptReply(m)
+			handled = true
+		} else {
+			log.Debugf("no waiter for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
 		}
+	}
 
-		handled := false
-		if m.IsReply() {
-			replyCounter++
-			if replyCounter%100 == 0 && channel.waiters.Size() > 1000 {
-				channel.waiters.reapExpired(now)
-			}
-			replyFor := m.ReplyFor()
-			if replyReceiver := channel.waiters.RemoveWaiter(replyFor); replyReceiver != nil {
-				log.Tracef("waiter found for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
-				replyReceiver.AcceptReply(m)
-				handled = true
-			} else {
-				log.Debugf("no waiter for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
-			}
-		}
+	if !handled {
+		if receiveHandler, found := channel.receiveHandlers[m.ContentType]; found {
+			receiveHandler.HandleReceive(m, channel)
 
-		if !handled {
-			if receiveHandler, found := channel.receiveHandlers[m.ContentType]; found {
-				receiveHandler.HandleReceive(m, channel)
-
-			} else if anyHandler, found := channel.receiveHandlers[AnyContentType]; found {
-				anyHandler.HandleReceive(m, channel)
-			} else {
-				log.Warnf("dropped message. type [%d], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, m.ReplyFor())
-			}
+		} else if anyHandler, found := channel.receiveHandlers[AnyContentType]; found {
+			anyHandler.HandleReceive(m, channel)
+		} else {
+			log.Warnf("dropped message. type [%d], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, m.ReplyFor())
 		}
 	}
 }
@@ -404,61 +406,71 @@ func (channel *channelImpl) txer() {
 
 		for channel.outPriority.Len() > 0 {
 			sendable := heap.Pop(channel.outPriority).(Sendable)
-			sendListener := sendable.SendListener()
-			m := sendable.Msg()
-
-			if err := sendable.Context().Err(); err != nil {
-				sendListener.NotifyErr(TimeoutError{err})
-				continue
+			if err := channel.tx(sendable, writeTimeout); err != nil {
+				return
 			}
-
-			sendListener.NotifyBeforeWrite()
-
-			if m == nil { // allow nil message in Sendable so we can send tracers to check time from send to write
-				continue
-			}
-
-			for _, transformHandler := range channel.transformHandlers {
-				transformHandler.Tx(m, channel)
-			}
-
-			channel.waiters.AddWaiter(sendable)
-
-			var err error
-			if writeTimeout > 0 {
-				if err = channel.underlay.SetWriteTimeout(writeTimeout); err != nil {
-					log.WithError(err).Errorf("unable to set write timeout")
-					sendListener.NotifyErr(err)
-					done = true
-				}
-			}
-
-			if !done {
-				err = channel.underlay.Tx(m)
-				if err != nil {
-					log.WithError(err).Errorf("write error")
-					sendListener.NotifyErr(err)
-					done = true
-				} else {
-					for _, peekHandler := range channel.peekHandlers {
-						peekHandler.Tx(m, channel)
-					}
-				}
-			}
-
-			if err != nil {
-				for _, errorHandler := range channel.errorHandlers {
-					errorHandler.HandleError(err, channel)
-				}
-			}
-
-			sendListener.NotifyAfterWrite()
 		}
 
 		if done {
 			return
 		}
 	}
+}
+
+func (channel *channelImpl) tx(sendable Sendable, writeTimeout time.Duration) error {
+	log := pfxlog.ContextLogger(channel.Label())
+
+	sendListener := sendable.SendListener()
+	m := sendable.Msg()
+
+	if err := sendable.Context().Err(); err != nil {
+		sendListener.NotifyErr(TimeoutError{err})
+		return nil
+	}
+
+	sendListener.NotifyBeforeWrite()
+
+	if m == nil { // allow nil message in Sendable so we can send tracers to check time from send to write
+		return nil
+	}
+
+	for _, transformHandler := range channel.transformHandlers {
+		transformHandler.Tx(m, channel)
+	}
+
+	channel.waiters.AddWaiter(sendable)
+
+	var err error
+	if writeTimeout > 0 {
+		if err = channel.underlay.SetWriteTimeout(writeTimeout); err != nil {
+			log.WithError(err).Errorf("unable to set write timeout")
+			sendListener.NotifyErr(err)
+			return err
+		}
+	}
+
+	err = channel.underlay.Tx(m)
+
+	if err != nil {
+		log.WithError(err).Errorf("write error")
+		sendListener.NotifyErr(err)
+
+		for _, errorHandler := range channel.errorHandlers {
+			errorHandler.HandleError(err, channel)
+		}
+
+		sendListener.NotifyAfterWrite()
+
+		return err
+	}
+
+	for _, peekHandler := range channel.peekHandlers {
+		peekHandler.Tx(m, channel)
+	}
+
+	sendListener.NotifyAfterWrite()
+
+	return nil
 }
 
 func (ch *channelImpl) GetTimeSinceLastRead() time.Duration {

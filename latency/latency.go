@@ -18,7 +18,7 @@ package latency
 
 import (
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v3"
+	"github.com/openziti/channel/v4"
 	"sync/atomic"
 	"time"
 )

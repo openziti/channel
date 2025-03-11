@@ -44,7 +44,7 @@ type DialerConfig struct {
 	TransportConfig transport.Configuration
 }
 
-func NewClassicDialer(cfg DialerConfig) UnderlayFactory {
+func NewClassicDialer(cfg DialerConfig) DialUnderlayFactory {
 	result := &classicDialer{
 		identity:        cfg.Identity,
 		endpoint:        cfg.Endpoint,
@@ -62,8 +62,11 @@ func NewClassicDialer(cfg DialerConfig) UnderlayFactory {
 
 	return result
 }
-
 func (self *classicDialer) Create(timeout time.Duration) (Underlay, error) {
+	return self.CreateWithHeaders(timeout, nil)
+}
+
+func (self *classicDialer) CreateWithHeaders(timeout time.Duration, headers map[int32][]byte) (Underlay, error) {
 	log := pfxlog.ContextLogger(self.endpoint.String())
 	log.Debug("started")
 	defer log.Debug("exited")
@@ -86,7 +89,7 @@ func (self *classicDialer) Create(timeout time.Duration) (Underlay, error) {
 		}
 
 		underlay := self.underlayFactory(self.messageStrategy, peer, version)
-		if err = self.sendHello(underlay, deadline); err != nil {
+		if err = self.sendHello(underlay, deadline, headers); err != nil {
 			if tryCount > 0 {
 				return nil, err
 			} else {
@@ -102,7 +105,7 @@ func (self *classicDialer) Create(timeout time.Duration) (Underlay, error) {
 	return nil, errors.New("timeout waiting for dial")
 }
 
-func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Time) error {
+func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Time, headers map[int32][]byte) error {
 	log := pfxlog.ContextLogger(underlay.Label())
 	defer log.Debug("exited")
 	log.Debug("started")
@@ -120,6 +123,9 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 	}()
 
 	request := NewHello(self.identity.Token, self.headers)
+	for k, v := range headers {
+		request.Headers[k] = v
+	}
 	request.SetSequence(HelloSequence)
 	if err := underlay.Tx(request); err != nil {
 		_ = underlay.Close()
@@ -141,7 +147,10 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 		return errors.New(result.Message)
 	}
 
-	connectionId := string(response.Headers[ConnectionIdHeader])
+	connectionId := string(headers[ConnectionIdHeader])
+	if connectionId == "" {
+		connectionId = string(response.Headers[ConnectionIdHeader])
+	}
 	id := ""
 
 	if val, ok := response.GetStringHeader(IdHeader); ok {
@@ -150,6 +159,9 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 		id = certs[0].Subject.CommonName
 	}
 
+	// type should always be controller by the dialing side, the listener shouldn't be setting a type
+	// in the header. Set the type here, so we can know the type on the dialing side as well
+	response.Headers[TypeHeader] = headers[TypeHeader]
 	underlay.init(id, connectionId, response.Headers)
 
 	return nil

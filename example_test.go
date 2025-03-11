@@ -2,7 +2,7 @@ package channel_test
 
 import (
 	"fmt"
-	"github.com/openziti/channel/v3"
+	"github.com/openziti/channel/v4"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2/tcp"
 	"time"
