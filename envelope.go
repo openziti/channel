@@ -21,8 +21,8 @@ func (self *priorityEnvelopeImpl) Sequence() int32 {
 	return self.msg.sequence
 }
 
-func (self *priorityEnvelopeImpl) Send(ch Channel) error {
-	return ch.Send(self)
+func (self *priorityEnvelopeImpl) Send(sender Sender) error {
+	return sender.Send(self)
 }
 
 func (self *priorityEnvelopeImpl) ReplyTo(msg *Message) Envelope {
@@ -139,18 +139,18 @@ func (self *envelopeImpl) WithTimeout(duration time.Duration) TimeoutEnvelope {
 	return self
 }
 
-func (self *envelopeImpl) Send(ch Channel) error {
-	return ch.Send(self)
+func (self *envelopeImpl) Send(sender Sender) error {
+	return sender.Send(self)
 }
 
-func (self *envelopeImpl) SendAndWaitForWire(ch Channel) error {
+func (self *envelopeImpl) SendAndWaitForWire(sender Sender) error {
 	waitSendContext := &sendWaitEnvelope{envelopeImpl: self}
-	return waitSendContext.WaitForWire(ch)
+	return waitSendContext.WaitForWire(sender)
 }
 
-func (self *envelopeImpl) SendForReply(ch Channel) (*Message, error) {
+func (self *envelopeImpl) SendForReply(sender Sender) (*Message, error) {
 	replyContext := &replyEnvelope{envelopeImpl: self}
-	return replyContext.WaitForReply(ch)
+	return replyContext.WaitForReply(sender)
 }
 
 type sendWaitEnvelope struct {
@@ -174,7 +174,7 @@ func (self *sendWaitEnvelope) NotifyErr(err error) {
 	self.errC <- err
 }
 
-func (self *sendWaitEnvelope) WaitForWire(ch Channel) error {
+func (self *sendWaitEnvelope) WaitForWire(sender Sender) error {
 	if err := self.context.Err(); err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func (self *sendWaitEnvelope) WaitForWire(ch Channel) error {
 
 	self.errC = make(chan error, 1)
 
-	if err := ch.Send(self); err != nil {
+	if err := sender.Send(self); err != nil {
 		return err
 	}
 	select {
@@ -233,7 +233,7 @@ func (self *replyEnvelope) NotifyErr(err error) {
 	self.errC <- err
 }
 
-func (self *replyEnvelope) WaitForReply(ch Channel) (*Message, error) {
+func (self *replyEnvelope) WaitForReply(sender Sender) (*Message, error) {
 	if err := self.context.Err(); err != nil {
 		return nil, err
 	}
@@ -243,7 +243,7 @@ func (self *replyEnvelope) WaitForReply(ch Channel) (*Message, error) {
 	self.errC = make(chan error, 1)
 	self.replyC = make(chan *Message, 1)
 
-	if err := ch.Send(self); err != nil {
+	if err := sender.Send(self); err != nil {
 		return nil, err
 	}
 
@@ -304,11 +304,11 @@ func (self *errorEnvelope) ToSendable() Sendable {
 	return self
 }
 
-func (self *errorEnvelope) SendAndWaitForWire(Channel) error {
+func (self *errorEnvelope) SendAndWaitForWire(Sender) error {
 	return self.ctx.Err()
 }
 
-func (self *errorEnvelope) SendForReply(Channel) (*Message, error) {
+func (self *errorEnvelope) SendForReply(Sender) (*Message, error) {
 	return nil, self.ctx.Err()
 }
 
@@ -316,7 +316,7 @@ func (self *errorEnvelope) WithTimeout(time.Duration) TimeoutEnvelope {
 	return self
 }
 
-func (self *errorEnvelope) Send(Channel) error {
+func (self *errorEnvelope) Send(Sender) error {
 	return self.ctx.Err()
 }
 

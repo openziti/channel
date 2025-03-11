@@ -18,6 +18,7 @@ package channel
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/goroutines"
 	"github.com/openziti/identity"
@@ -181,21 +182,14 @@ func (self *classicListener) acceptConnection(peer transport.Conn) {
 	err := self.listenerPool.Queue(func() {
 		impl := self.underlayFactory(self.messageStrategy, peer, 2)
 
-		connectionId, err := NextConnectionId()
-		if err != nil {
-			_ = peer.Close()
-			log.Errorf("error getting connection id for [%s] (%v)", peer.Detail().Address, err)
-			return
-		}
-
-		if err = peer.SetDeadline(time.Now().Add(self.connectOptions.ConnectTimeout)); err != nil {
+		if err := peer.SetDeadline(time.Now().Add(self.connectOptions.ConnectTimeout)); err != nil {
 			log.Errorf("could not set connection deadline for [%s] (%v)", peer.Detail().Address, err)
 			_ = peer.Close()
 			return
 		}
 
 		defer func() {
-			if err = peer.SetDeadline(time.Time{}); err != nil {
+			if err := peer.SetDeadline(time.Time{}); err != nil {
 				log.Errorf("could not clear connection deadline for [%s] (%v)", peer.Detail().Address, err)
 				_ = peer.Close()
 				return
@@ -219,6 +213,14 @@ func (self *classicListener) acceptConnection(peer transport.Conn) {
 			log.Errorf("connection handler error for [%s] (%v)", peer.Detail().Address, err)
 			_ = peer.Close()
 			return
+		}
+
+		connectionId := string(hello.Headers[ConnectionIdHeader])
+		if connectionId == "" {
+			connectionId, err = NextConnectionId()
+			if err != nil {
+				connectionId = uuid.New().String()
+			}
 		}
 
 		impl.init(hello.IdToken, connectionId, hello.Headers)
