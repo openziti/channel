@@ -131,3 +131,34 @@ type CloseHandlerF func(ch Channel)
 func (self CloseHandlerF) HandleClose(ch Channel) {
 	self(ch)
 }
+
+type MessageSourceF func() (Sendable, error)
+
+type UnderlayHandler interface {
+	// Start is called after the MultiChannel has been created with the first underlay
+	// If this is a dial side, Start may be used to add additional underlays
+	Start(channel MultiChannel)
+
+	// GetMessageSource returns the message source for the given underlay. In general this will
+	// check the type in the underlay headers and use that to figure out which go channels
+	// to read from
+	GetMessageSource(underlay Underlay) MessageSourceF
+
+	// HandleTxFailed is called when an underlay write fails. This allows the message to
+	// be re-queued if the channel semantic allow.
+	HandleTxFailed(underlay Underlay, sendable Sendable) bool
+
+	// HandleUnderlayClose is called when an underlay closes. This may cause the multi channel to be
+	// closed if it no longer has enough underlays to meet its requirements, or may intitiate
+	// dialing addition underlays
+	HandleUnderlayClose(channel MultiChannel, underlay Underlay)
+
+	// HandleUnderlayAccepted is call when an underlay is added to the multi-underlay channel
+	HandleUnderlayAccepted(channel MultiChannel, underlay Underlay)
+
+	// GetDefaultSender returns the default sender for the underlay
+	GetDefaultSender() Sender
+
+	// GetCloseNotify returns the chan used to signal that the channel is closed
+	GetCloseNotify() chan struct{}
+}

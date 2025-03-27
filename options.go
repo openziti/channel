@@ -37,7 +37,6 @@ type PacketMessageProducer func(b []byte) (*Message, error)
 type Options struct {
 	OutQueueSize int
 	ConnectOptions
-	DelayRxStart    bool
 	WriteTimeout    time.Duration
 	MessageStrategy MessageStrategy
 }
@@ -156,4 +155,10 @@ func (co *ConnectOptions) validateConnectTimeout() error {
 	}
 
 	return nil
+}
+
+type MultiChannelOptions struct {
+	ConnectOptions
+	WriteTimeout    time.Duration
+	MessageStrategy MessageStrategy
 }

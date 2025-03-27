@@ -47,6 +47,7 @@ const (
 	HeartbeatResponseHeader         = 6
 	TypeHeader                      = 7
 	IdHeader                        = 8
+	IsGroupedHeader                 = 9
 
 	// Headers in the range 128-255 inclusive will be reflected when creating replies
 	ReflectedHeaderBitMask = 1 << 7
@@ -332,8 +333,8 @@ func (m *Message) SetSequence(seq int32) {
 	m.sequence = seq
 }
 
-func (m *Message) Send(ch Channel) error {
-	return ch.Send(m)
+func (m *Message) Send(sender Sender) error {
+	return sender.Send(m)
 }
 
 func (m *Message) ToSendable() Sendable {

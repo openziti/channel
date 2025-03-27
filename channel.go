@@ -34,8 +34,16 @@ type Channel interface {
 	io.Closer
 	IsClosed() bool
 	Underlay() Underlay
-	StartRx()
+	Headers() map[int32][]byte
 	GetTimeSinceLastRead() time.Duration
+}
+
+type MultiChannel interface {
+	Channel
+	DialUnderlay(factory GroupedUnderlayFactory, underlayType string)
+	AcceptUnderlay(underlay Underlay) bool
+	GetUnderlayCountsByType() map[string]int
+	GetUnderlayHandler() UnderlayHandler
 }
 
 type Sender interface {
@@ -82,7 +90,7 @@ type Envelope interface {
 	WithTimeout(duration time.Duration) TimeoutEnvelope
 
 	// Send sends the envelope on the given Channel
-	Send(ch Channel) error
+	Send(sender Sender) error
 
 	// ReplyTo allows setting the reply header in a fluent style
 	ReplyTo(msg *Message) Envelope
@@ -98,11 +106,11 @@ type TimeoutEnvelope interface {
 
 	// SendAndWaitForWire will wait until the configured timeout or until the message is sent, whichever comes first
 	// If the timeout happens first, the context error will be returned, wrapped by a TimeoutError
-	SendAndWaitForWire(ch Channel) error
+	SendAndWaitForWire(sender Sender) error
 
 	// SendForReply will wait until the configured timeout or until a reply is received, whichever comes first
 	// If the timeout happens first, the context error will be returned, wrapped by a TimeoutError
-	SendForReply(ch Channel) (*Message, error)
+	SendForReply(sender Sender) (*Message, error)
 }
 
 // SendListener is notified at the various stages of a message send
@@ -157,6 +165,16 @@ type UnderlayListener interface {
 // UnderlayFactory, to provide instances to Channel.
 type UnderlayFactory interface {
 	Create(timeout time.Duration) (Underlay, error)
+}
+
+type DialUnderlayFactory interface {
+	UnderlayFactory
+	CreateWithHeaders(timeout time.Duration, headers map[int32][]byte) (Underlay, error)
+}
+
+type GroupedUnderlayFactory interface {
+	CreateGroupedUnderlay(groupId string, underlayType string, timeout time.Duration) (Underlay, error)
+	DialFailed(channel MultiChannel, underlayType string, attempt int)
 }
 
 // Underlay abstracts a physical communications channel, typically sitting on top of 'transport'.
