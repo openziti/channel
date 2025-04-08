@@ -122,8 +122,7 @@ func NewMultiChannel(config *MultiChannelConfig) (MultiChannel, error) {
 		return nil, err
 	}
 
-	go impl.Rxer(config.Underlay)
-	go impl.Txer(config.Underlay)
+	impl.startMultiplex(config.Underlay)
 	go impl.underlayHandler.Start(impl)
 
 	impl.underlayHandler.HandleUnderlayAccepted(impl, config.Underlay)
@@ -146,12 +145,17 @@ func (self *multiChannelImpl) AcceptUnderlay(underlay Underlay) bool {
 	self.headers.Store(underlay.Headers())
 	self.underlays.Append(underlay)
 
-	go self.Rxer(underlay)
-	go self.Txer(underlay)
+	self.startMultiplex(underlay)
 
 	self.underlayHandler.HandleUnderlayAccepted(self, underlay)
 
 	return true
+}
+
+func (self *multiChannelImpl) startMultiplex(underlay Underlay) {
+	notifier := NewCloseNotifier()
+	go self.Rxer(underlay, notifier)
+	go self.Txer(underlay, notifier)
 }
 
 func (self *multiChannelImpl) GetUnderlayCountsByType() map[string]int {
@@ -402,11 +406,13 @@ func (self *multiChannelImpl) Tx(underlay Underlay, sendable Sendable, writeTime
 	return nil
 }
 
-func (self *multiChannelImpl) CloseUnderlay(underlay Underlay) {
+func (self *multiChannelImpl) closeUnderlay(underlay Underlay, notifier *CloseNotifier) {
 	self.lock.Lock()
 	if err := underlay.Close(); err != nil {
 		pfxlog.Logger().WithField("context", self.Label()).WithError(err).Error("error closing underlay")
 	}
+
+	notifier.NotifyClosed()
 
 	underlayRemoved := false
 	self.underlays.DeleteIf(func(element Underlay) bool {
@@ -427,8 +433,8 @@ func (self *multiChannelImpl) GetTimeSinceLastRead() time.Duration {
 	return time.Duration(info.NowInMilliseconds()-atomic.LoadInt64(&self.lastRead)) * time.Millisecond
 }
 
-func (self *multiChannelImpl) Txer(underlay Underlay) {
-	defer self.CloseUnderlay(underlay)
+func (self *multiChannelImpl) Txer(underlay Underlay, notifier *CloseNotifier) {
+	defer self.closeUnderlay(underlay, notifier)
 
 	log := pfxlog.ContextLogger(self.Label())
 
@@ -440,7 +446,7 @@ func (self *multiChannelImpl) Txer(underlay Underlay) {
 	messageSource := self.underlayHandler.GetMessageSource(underlay)
 
 	for {
-		sendable, err := messageSource()
+		sendable, err := messageSource(notifier)
 		if err != nil {
 			return
 		}
@@ -456,8 +462,8 @@ func (self *multiChannelImpl) Txer(underlay Underlay) {
 	}
 }
 
-func (self *multiChannelImpl) Rxer(underlay Underlay) {
-	defer self.CloseUnderlay(underlay)
+func (self *multiChannelImpl) Rxer(underlay Underlay, notifier *CloseNotifier) {
+	defer self.closeUnderlay(underlay, notifier)
 
 	log := pfxlog.ContextLogger(self.Label())
 	log.Debug("started")
@@ -591,4 +597,25 @@ func (self *UnderlayConstraints) Apply(ch MultiChannel, factory GroupedUnderlayF
 			return
 		}
 	}
+}
+
+func NewCloseNotifier() *CloseNotifier {
+	return &CloseNotifier{
+		c: make(chan struct{}),
+	}
+}
+
+type CloseNotifier struct {
+	c        chan struct{}
+	notified atomic.Bool
+}
+
+func (self *CloseNotifier) NotifyClosed() {
+	if self.notified.CompareAndSwap(false, true) {
+		close(self.c)
+	}
+}
+
+func (self *CloseNotifier) GetCloseNotify() <-chan struct{} {
+	return self.c
 }
