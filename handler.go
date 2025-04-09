@@ -132,7 +132,7 @@ func (self CloseHandlerF) HandleClose(ch Channel) {
 	self(ch)
 }
 
-type MessageSourceF func() (Sendable, error)
+type MessageSourceF func(notifer *CloseNotifier) (Sendable, error)
 
 type UnderlayHandler interface {
 	// Start is called after the MultiChannel has been created with the first underlay

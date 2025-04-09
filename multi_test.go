@@ -219,7 +219,7 @@ func (self *priorityChannelBase) GetPrioritySender() Sender {
 	return self.prioritySender
 }
 
-func (self *priorityChannelBase) GetNextMsgDefault() (Sendable, error) {
+func (self *priorityChannelBase) GetNextMsgDefault(notifier *CloseNotifier) (Sendable, error) {
 	select {
 	case msg := <-self.defaultMsgChan:
 		return msg, nil
@@ -229,16 +229,20 @@ func (self *priorityChannelBase) GetNextMsgDefault() (Sendable, error) {
 		return msg, nil
 	case <-self.GetCloseNotify():
 		return nil, io.EOF
+	case <-notifier.GetCloseNotify():
+		return nil, io.EOF
 	}
 }
 
-func (self *priorityChannelBase) GetNextPriorityMsg() (Sendable, error) {
+func (self *priorityChannelBase) GetNextPriorityMsg(notifier *CloseNotifier) (Sendable, error) {
 	select {
 	case msg := <-self.priorityMsgChan:
 		return msg, nil
 	case msg := <-self.retryMsgChan:
 		return msg, nil
 	case <-self.GetCloseNotify():
+		return nil, io.EOF
+	case <-notifier.GetCloseNotify():
 		return nil, io.EOF
 	}
 }

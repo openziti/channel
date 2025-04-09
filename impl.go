@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/concurrenz"
+	"github.com/openziti/foundation/v2/debugz"
 	"github.com/openziti/foundation/v2/info"
 	"github.com/openziti/foundation/v2/sequence"
 	"github.com/pkg/errors"
@@ -108,6 +109,7 @@ func NewChannelWithUnderlay(logicalName string, underlay Underlay, bindHandler B
 		return nil, err
 	}
 
+	debugz.DumpLocalStack()
 	impl.startMultiplex()
 
 	return impl, nil
