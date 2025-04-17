@@ -36,6 +36,7 @@ type Channel interface {
 	Underlay() Underlay
 	Headers() map[int32][]byte
 	GetTimeSinceLastRead() time.Duration
+	GetUserData() interface{}
 }
 
 type MultiChannel interface {
