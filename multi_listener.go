@@ -30,20 +30,22 @@ type MultiListener struct {
 }
 
 func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
-	self.lock.Lock()
-	defer self.lock.Unlock()
-
 	log := pfxlog.Logger().WithField("underlayId", underlay.ConnectionId()).
 		WithField("underlayType", GetUnderlayType(underlay))
 
 	chId := underlay.ConnectionId()
 
-	if mc, ok := self.channels[chId]; ok {
+	self.lock.Lock()
+	mc, ok := self.channels[chId]
+	self.lock.Unlock()
+
+	if ok {
 		log.Info("found existing channel for underlay")
 		mc.AcceptUnderlay(underlay)
 	} else {
 		log.Info("no existing channel found for underlay")
-		mc, err := self.channelFactory(underlay, func() {
+		var err error
+		mc, err = self.channelFactory(underlay, func() {
 			self.CloseChannel(chId)
 		})
 
@@ -51,7 +53,9 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 			if err != nil {
 				pfxlog.Logger().WithError(err).Errorf("failed to create multi-underlay channel")
 			} else {
+				self.lock.Lock()
 				self.channels[chId] = mc
+				self.lock.Unlock()
 			}
 		}
 	}
@@ -59,8 +63,8 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 
 func (self *MultiListener) CloseChannel(chId string) {
 	self.lock.Lock()
-	defer self.lock.Unlock()
 	delete(self.channels, chId)
+	self.lock.Unlock()
 }
 
 func NewMultiListener(channelF MultiChannelFactory) *MultiListener {
