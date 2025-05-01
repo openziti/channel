@@ -17,6 +17,7 @@
 package channel
 
 import (
+	"bytes"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -83,6 +84,7 @@ type multiChannelImpl struct {
 	underlayHandler   UnderlayHandler
 	userData          interface{}
 	replyCounter      uint32
+	groupSecret       []byte
 
 	lock      sync.Mutex
 	underlays concurrenz.CopyOnWriteSlice[Underlay]
@@ -111,6 +113,12 @@ func NewMultiChannel(config *MultiChannelConfig) (MultiChannel, error) {
 	impl.headers.Store(config.Underlay.Headers())
 	impl.underlays.Append(config.Underlay)
 
+	if groupSecret := config.Underlay.Headers()[GroupSecretHeader]; len(groupSecret) == 0 {
+		return nil, errors.New("no group secret header found for multi channel")
+	} else {
+		impl.groupSecret = groupSecret
+	}
+
 	if err := bind(config.BindHandler, impl); err != nil {
 		for _, u := range impl.underlays.Value() {
 			if closeErr := u.Close(); closeErr != nil {
@@ -130,15 +138,23 @@ func NewMultiChannel(config *MultiChannelConfig) (MultiChannel, error) {
 	return impl, nil
 }
 
-func (self *multiChannelImpl) AcceptUnderlay(underlay Underlay) bool {
+func (self *multiChannelImpl) AcceptUnderlay(underlay Underlay) error {
 	self.lock.Lock()
 	defer self.lock.Unlock()
+
+	groupSecret := underlay.Headers()[GroupSecretHeader]
+	if !bytes.Equal(groupSecret, self.groupSecret) {
+		if err := underlay.Close(); err != nil {
+			pfxlog.ContextLogger(self.Label()).WithError(err).Error("error closing underlay")
+		}
+		return fmt.Errorf("new underlay for '%s' not accepted: incorrect group secret", self.ConnectionId())
+	}
 
 	if self.IsClosed() {
 		if err := underlay.Close(); err != nil {
 			pfxlog.ContextLogger(self.Label()).WithError(err).Error("error closing underlay")
 		}
-		return false
+		return fmt.Errorf("new underlay for '%s' not accepted: multi-channel is closed", self.ConnectionId())
 	}
 
 	self.certs.Store(underlay.Certificates())
@@ -149,7 +165,7 @@ func (self *multiChannelImpl) AcceptUnderlay(underlay Underlay) bool {
 
 	self.underlayHandler.HandleUnderlayAccepted(self, underlay)
 
-	return true
+	return nil
 }
 
 func (self *multiChannelImpl) startMultiplex(underlay Underlay) {
@@ -499,9 +515,12 @@ func (self *multiChannelImpl) DialUnderlay(factory GroupedUnderlayFactory, under
 			dialTimeout = DefaultConnectTimeout
 		}
 
-		underlay, err := factory.CreateGroupedUnderlay(self.ConnectionId(), underlayType, dialTimeout)
+		underlay, err := factory.CreateGroupedUnderlay(self.ConnectionId(), self.groupSecret, underlayType, dialTimeout)
 		if err == nil {
-			self.AcceptUnderlay(underlay)
+			if err = self.AcceptUnderlay(underlay); err != nil {
+				log.WithError(err).Error("dial of new underlay failed")
+				factory.DialFailed(self, underlayType, attempt)
+			}
 			return
 		} else {
 			factory.DialFailed(self, underlayType, attempt)
