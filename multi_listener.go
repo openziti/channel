@@ -41,7 +41,9 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 
 	if ok {
 		log.Info("found existing channel for underlay")
-		mc.AcceptUnderlay(underlay)
+		if err := mc.AcceptUnderlay(underlay); err != nil {
+			log.WithError(err).Error("error accepting underlay")
+		}
 	} else {
 		log.Info("no existing channel found for underlay")
 		var err error

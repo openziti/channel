@@ -329,10 +329,11 @@ func (self *dialPriorityChannel) DialFailed(_ MultiChannel, _ string, attempt in
 	time.Sleep(delay)
 }
 
-func (self *dialPriorityChannel) CreateGroupedUnderlay(groupId string, underlayType string, timeout time.Duration) (Underlay, error) {
+func (self *dialPriorityChannel) CreateGroupedUnderlay(groupId string, groupSecret []byte, underlayType string, timeout time.Duration) (Underlay, error) {
 	underlay, err := self.dialer.CreateWithHeaders(timeout, map[int32][]byte{
 		TypeHeader:         []byte(underlayType),
 		ConnectionIdHeader: []byte(groupId),
+		GroupSecretHeader:  groupSecret,
 		IsGroupedHeader:    {1},
 	})
 	if err != nil {

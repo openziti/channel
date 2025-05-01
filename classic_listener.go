@@ -225,6 +225,13 @@ func (self *classicListener) acceptConnection(peer transport.Conn) {
 			}
 		}
 
+		if isGrouped {
+			if secret := hello.Headers[GroupSecretHeader]; len(secret) == 0 {
+				newSecret := uuid.New()
+				hello.Headers[GroupSecretHeader] = newSecret[:]
+			}
+		}
+
 		impl.init(hello.IdToken, connectionId, hello.Headers)
 
 		if err = self.ackHello(impl, request, true, ""); err == nil {
@@ -284,6 +291,9 @@ func (self *classicListener) ackHello(impl classicUnderlay, request *Message, su
 	}
 	if underlayType, _ := request.GetStringHeader(TypeHeader); underlayType != "" {
 		response.PutStringHeader(TypeHeader, underlayType)
+	}
+	if groupSecret := request.Headers[GroupSecretHeader]; len(groupSecret) > 0 {
+		response.Headers[GroupSecretHeader] = groupSecret
 	}
 
 	response.sequence = HelloSequence

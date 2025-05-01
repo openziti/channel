@@ -41,8 +41,8 @@ type Channel interface {
 
 type MultiChannel interface {
 	Channel
+	UnderlayAcceptor
 	DialUnderlay(factory GroupedUnderlayFactory, underlayType string)
-	AcceptUnderlay(underlay Underlay) bool
 	GetUnderlayCountsByType() map[string]int
 	GetUnderlayHandler() UnderlayHandler
 }
@@ -174,7 +174,7 @@ type DialUnderlayFactory interface {
 }
 
 type GroupedUnderlayFactory interface {
-	CreateGroupedUnderlay(groupId string, underlayType string, timeout time.Duration) (Underlay, error)
+	CreateGroupedUnderlay(groupId string, groupedSecret []byte, underlayType string, timeout time.Duration) (Underlay, error)
 	DialFailed(channel MultiChannel, underlayType string, attempt int)
 }
 

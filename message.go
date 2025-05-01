@@ -48,6 +48,7 @@ const (
 	TypeHeader                      = 7
 	IdHeader                        = 8
 	IsGroupedHeader                 = 9
+	GroupSecretHeader               = 10
 
 	// Headers in the range 128-255 inclusive will be reflected when creating replies
 	ReflectedHeaderBitMask = 1 << 7
