@@ -17,6 +17,7 @@
 package channel
 
 import (
+	"errors"
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/goroutines"
@@ -112,6 +113,8 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 		}
 		underlayHandler := NewListenerPriorityChannel(wrapper)
 		return newMultiChannel("listener", underlayHandler, wrapper, closeCallback)
+	}, func(underlay Underlay) error {
+		return errors.New("this implementation only accepts grouped channel")
 	})
 
 	listenerConfig := ListenerConfig{
