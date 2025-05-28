@@ -368,6 +368,16 @@ func (m *Message) WithTimeout(duration time.Duration) TimeoutEnvelope {
 	}
 }
 
+func (m *Message) WithContext(c context.Context) TimeoutEnvelope {
+	c, cancelF := context.WithCancel(c)
+	return &envelopeImpl{
+		msg:     m,
+		p:       Standard,
+		context: c,
+		cancelF: cancelF,
+	}
+}
+
 func (m *Message) Context() context.Context {
 	return context.Background()
 }

@@ -112,10 +112,11 @@ func newExistingImpl(peer net.Conn, version uint32) *existingConnImpl {
 	readF := ReadV2
 	marshalF := MarshalV2
 
-	if version == 2 {
+	switch version {
+	case 2:
 		readF = ReadV2
 		marshalF = MarshalV2
-	} else if version == 3 { // currently only used for testing fallback to a common protocol version
+	case 3:
 		readF = ReadV2
 		marshalF = marshalV3
 	}

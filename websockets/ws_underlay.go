@@ -43,12 +43,12 @@ func NewUnderlayFactory(id *identity.TokenId, peer *websocket.Conn, certs []*x50
 	}
 }
 
-func (impl *Underlay) GetLocalAddr() net.Addr {
-	return impl.peer.LocalAddr()
+func (self *Underlay) GetLocalAddr() net.Addr {
+	return self.peer.LocalAddr()
 }
 
-func (impl *Underlay) GetRemoteAddr() net.Addr {
-	return impl.peer.RemoteAddr()
+func (self *Underlay) GetRemoteAddr() net.Addr {
+	return self.peer.RemoteAddr()
 }
 func (self *Underlay) Create(time.Duration) (channel.Underlay, error) {
 	return self, nil
