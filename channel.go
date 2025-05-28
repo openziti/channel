@@ -90,6 +90,9 @@ type Envelope interface {
 	// WithTimeout returns a TimeoutEnvelope with a context using the given timeout
 	WithTimeout(duration time.Duration) TimeoutEnvelope
 
+	// WithContext returns a TimeoutEnvelope which uses the given context for timeout/cancellation
+	WithContext(c context.Context) TimeoutEnvelope
+
 	// Send sends the envelope on the given Channel
 	Send(sender Sender) error
 

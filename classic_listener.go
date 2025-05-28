@@ -68,9 +68,9 @@ func newClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 	closeNotify := make(chan struct{})
 
 	poolConfig := goroutines.PoolConfig{
-		QueueSize:  uint32(config.ConnectOptions.MaxQueuedConnects),
+		QueueSize:  uint32(config.MaxQueuedConnects),
 		MinWorkers: 1,
-		MaxWorkers: uint32(config.ConnectOptions.MaxOutstandingConnects),
+		MaxWorkers: uint32(config.MaxOutstandingConnects),
 		IdleTime:   10 * time.Second,
 		PanicHandler: func(err interface{}) {
 			pfxlog.Logger().

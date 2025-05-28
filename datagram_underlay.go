@@ -136,14 +136,14 @@ func (self *DatagramUnderlay) SetWriteDeadline(deadline time.Time) error {
 	return self.peer.SetWriteDeadline(deadline)
 }
 
-func (impl *DatagramUnderlay) init(id string, connectionId string, headers Headers) {
-	impl.id = id
-	impl.connectionId = connectionId
-	impl.headers = headers
+func (self *DatagramUnderlay) init(id string, connectionId string, headers Headers) {
+	self.id = id
+	self.connectionId = connectionId
+	self.headers = headers
 }
 
-func (impl *DatagramUnderlay) getPeer() transport.Conn {
-	return impl.peer
+func (self *DatagramUnderlay) getPeer() transport.Conn {
+	return self.peer
 }
 
 func (self *DatagramUnderlay) rxHello() (*Message, error) {

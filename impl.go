@@ -473,8 +473,8 @@ func (channel *channelImpl) tx(sendable Sendable, writeTimeout time.Duration) er
 	return nil
 }
 
-func (ch *channelImpl) GetTimeSinceLastRead() time.Duration {
-	return time.Duration(info.NowInMilliseconds()-atomic.LoadInt64(&ch.lastRead)) * time.Millisecond
+func (channel *channelImpl) GetTimeSinceLastRead() time.Duration {
+	return time.Duration(info.NowInMilliseconds()-atomic.LoadInt64(&channel.lastRead)) * time.Millisecond
 }
 
 type waiter struct {

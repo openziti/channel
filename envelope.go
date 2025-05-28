@@ -69,6 +69,16 @@ func (self *priorityEnvelopeImpl) WithTimeout(duration time.Duration) TimeoutEnv
 	}
 }
 
+func (self *priorityEnvelopeImpl) WithContext(c context.Context) TimeoutEnvelope {
+	ctx, cancelF := context.WithCancel(c)
+	return &envelopeImpl{
+		msg:     self.msg,
+		p:       self.p,
+		context: ctx,
+		cancelF: cancelF,
+	}
+}
+
 type envelopeImpl struct {
 	msg     *Message
 	p       Priority
@@ -136,6 +146,11 @@ func (self *envelopeImpl) WithTimeout(duration time.Duration) TimeoutEnvelope {
 		parent = context.Background()
 	}
 	self.context, self.cancelF = context.WithTimeout(parent, duration)
+	return self
+}
+
+func (self *envelopeImpl) WithContext(c context.Context) TimeoutEnvelope {
+	self.context, self.cancelF = context.WithCancel(c)
 	return self
 }
 
@@ -270,7 +285,7 @@ type errorEnvelope struct {
 	ctx context.Context
 }
 
-func (self *errorEnvelope) SetSequence(seq int32) {}
+func (self *errorEnvelope) SetSequence(int32) {}
 
 func (self *errorEnvelope) Sequence() int32 {
 	return 0
@@ -280,7 +295,7 @@ func (self *errorEnvelope) Msg() *Message {
 	return nil
 }
 
-func (self *errorEnvelope) ReplyTo(msg *Message) Envelope {
+func (self *errorEnvelope) ReplyTo(*Message) Envelope {
 	return self
 }
 
@@ -313,6 +328,10 @@ func (self *errorEnvelope) SendForReply(Sender) (*Message, error) {
 }
 
 func (self *errorEnvelope) WithTimeout(time.Duration) TimeoutEnvelope {
+	return self
+}
+
+func (self *errorEnvelope) WithContext(context.Context) TimeoutEnvelope {
 	return self
 }
 

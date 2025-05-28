@@ -37,32 +37,32 @@ type wsImpl struct {
 	marshalF     marshalFunction
 }
 
-func (impl *wsImpl) SetWriteTimeout(duration time.Duration) error {
-	return impl.peer.SetWriteDeadline(time.Now().Add(duration))
+func (self *wsImpl) SetWriteTimeout(duration time.Duration) error {
+	return self.peer.SetWriteDeadline(time.Now().Add(duration))
 }
 
 func (self *wsImpl) SetWriteDeadline(deadline time.Time) error {
 	return self.peer.SetWriteDeadline(deadline)
 }
 
-func (impl *wsImpl) Rx() (*Message, error) {
-	if impl.closed {
+func (self *wsImpl) Rx() (*Message, error) {
+	if self.closed {
 		return nil, errors.New("underlay closed")
 	}
-	return impl.readF(impl.peer)
+	return self.readF(self.peer)
 }
 
-func (impl *wsImpl) Tx(m *Message) error {
-	if impl.closed {
+func (self *wsImpl) Tx(m *Message) error {
+	if self.closed {
 		return errors.New("underlay closed")
 	}
 
-	data, err := impl.marshalF(m)
+	data, err := self.marshalF(m)
 	if err != nil {
 		return err
 	}
 
-	_, err = impl.peer.Write(data)
+	_, err = self.peer.Write(data)
 	if err != nil {
 		return err
 	}
@@ -70,53 +70,54 @@ func (impl *wsImpl) Tx(m *Message) error {
 	return nil
 }
 
-func (impl *wsImpl) Id() string {
-	return impl.id.Token
+func (self *wsImpl) Id() string {
+	return self.id.Token
 }
 
-func (impl *wsImpl) Headers() map[int32][]byte {
-	return impl.headers
+func (self *wsImpl) Headers() map[int32][]byte {
+	return self.headers
 }
 
-func (impl *wsImpl) LogicalName() string {
+func (self *wsImpl) LogicalName() string {
 	return "ws"
 }
 
-func (impl *wsImpl) ConnectionId() string {
-	return impl.connectionId
+func (self *wsImpl) ConnectionId() string {
+	return self.connectionId
 }
 
-func (impl *wsImpl) Certificates() []*x509.Certificate {
-	return impl.peer.PeerCertificates()
+func (self *wsImpl) Certificates() []*x509.Certificate {
+	return self.peer.PeerCertificates()
 }
 
-func (impl *wsImpl) Label() string {
-	return fmt.Sprintf("u{%s}->i{%s}", impl.LogicalName(), impl.ConnectionId())
+func (self *wsImpl) Label() string {
+	return fmt.Sprintf("u{%s}->i{%s}", self.LogicalName(), self.ConnectionId())
 }
 
-func (impl *wsImpl) Close() error {
-	impl.closeLock.Lock()
-	defer impl.closeLock.Unlock()
+func (self *wsImpl) Close() error {
+	self.closeLock.Lock()
+	defer self.closeLock.Unlock()
 
-	if !impl.closed {
-		impl.closed = true
-		return impl.peer.Close()
+	if !self.closed {
+		self.closed = true
+		return self.peer.Close()
 	}
 	return nil
 }
 
-func (impl *wsImpl) IsClosed() bool {
-	return impl.closed
+func (self *wsImpl) IsClosed() bool {
+	return self.closed
 }
 
 func newWSImpl(peer transport.Conn, version uint32) *wsImpl {
 	readF := ReadV2
 	marshalF := MarshalV2
 
-	if version == 2 {
+	switch version {
+	case 2:
 		readF = ReadV2
 		marshalF = MarshalV2
-	} else if version == 3 { // currently only used for testing fallback to a common protocol version
+	case 3:
 		readF = ReadV2
 		marshalF = marshalV3
 	}

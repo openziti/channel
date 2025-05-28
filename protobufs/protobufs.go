@@ -38,9 +38,9 @@ func (self TypedResponseImpl) Unmarshall(responseMsg *channel.Message, err error
 	if err != nil {
 		return err
 	}
-	if responseMsg.ContentType != self.TypedMessage.GetContentType() {
+	if responseMsg.ContentType != self.GetContentType() {
 		return errors.Errorf("unexpected response type %v. expected %v",
-			responseMsg.ContentType, self.TypedMessage.GetContentType())
+			responseMsg.ContentType, self.GetContentType())
 	}
 	if err = proto.Unmarshal(responseMsg.Body, self.TypedMessage); err != nil {
 		return err

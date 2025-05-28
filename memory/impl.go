@@ -49,15 +49,15 @@ type memoryImpl struct {
 	closed       bool
 }
 
-func (impl *memoryImpl) GetLocalAddr() net.Addr {
-	return addr("local:" + impl.connectionId)
+func (self *memoryImpl) GetLocalAddr() net.Addr {
+	return addr("local:" + self.connectionId)
 }
 
-func (impl *memoryImpl) GetRemoteAddr() net.Addr {
-	return addr("remote:" + impl.connectionId)
+func (self *memoryImpl) GetRemoteAddr() net.Addr {
+	return addr("remote:" + self.connectionId)
 }
 
-func (impl *memoryImpl) SetWriteTimeout(time.Duration) error {
+func (self *memoryImpl) SetWriteTimeout(time.Duration) error {
 	panic("SetWriteTimeout not implemented")
 }
 
@@ -65,12 +65,12 @@ func (self *memoryImpl) SetWriteDeadline(deadline time.Time) error {
 	panic("SetWriteDeadline not implemented")
 }
 
-func (impl *memoryImpl) Rx() (*channel.Message, error) {
-	if impl.closed {
+func (self *memoryImpl) Rx() (*channel.Message, error) {
+	if self.closed {
 		return nil, errors.New("underlay closed")
 	}
 
-	m := <-impl.rx
+	m := <-self.rx
 	if m == nil {
 		return nil, io.EOF
 	}
@@ -78,8 +78,8 @@ func (impl *memoryImpl) Rx() (*channel.Message, error) {
 	return m, nil
 }
 
-func (impl *memoryImpl) Tx(m *channel.Message) error {
-	if impl.closed {
+func (self *memoryImpl) Tx(m *channel.Message) error {
+	if self.closed {
 		return errors.New("underlay closed")
 	}
 	defer func() {
@@ -88,48 +88,48 @@ func (impl *memoryImpl) Tx(m *channel.Message) error {
 		}
 	}()
 
-	impl.tx <- m
+	self.tx <- m
 
 	return nil
 }
 
-func (impl *memoryImpl) Id() string {
-	return impl.id.Token
+func (self *memoryImpl) Id() string {
+	return self.id.Token
 }
 
-func (impl *memoryImpl) Headers() map[int32][]byte {
-	return impl.headers
+func (self *memoryImpl) Headers() map[int32][]byte {
+	return self.headers
 }
 
-func (impl *memoryImpl) LogicalName() string {
+func (self *memoryImpl) LogicalName() string {
 	return "memory"
 }
 
-func (impl *memoryImpl) ConnectionId() string {
-	return impl.connectionId
+func (self *memoryImpl) ConnectionId() string {
+	return self.connectionId
 }
 
-func (impl *memoryImpl) Certificates() []*x509.Certificate {
+func (self *memoryImpl) Certificates() []*x509.Certificate {
 	return nil
 }
 
-func (impl *memoryImpl) Label() string {
-	return fmt.Sprintf("u{%s}->i{%s}", impl.LogicalName(), impl.ConnectionId())
+func (self *memoryImpl) Label() string {
+	return fmt.Sprintf("u{%s}->i{%s}", self.LogicalName(), self.ConnectionId())
 }
 
-func (impl *memoryImpl) Close() error {
-	impl.closeLock.Lock()
-	defer impl.closeLock.Unlock()
+func (self *memoryImpl) Close() error {
+	self.closeLock.Lock()
+	defer self.closeLock.Unlock()
 
-	if !impl.closed {
-		impl.closed = true
-		close(impl.tx)
+	if !self.closed {
+		self.closed = true
+		close(self.tx)
 	}
 	return nil
 }
 
-func (impl *memoryImpl) IsClosed() bool {
-	return impl.closed
+func (self *memoryImpl) IsClosed() bool {
+	return self.closed
 }
 
 func newMemoryImpl(tx, rx chan *channel.Message) *memoryImpl {
