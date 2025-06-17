@@ -338,8 +338,8 @@ github.com/openziti/foundation/v2 v2.0.66 h1:gVONHcMd5VJ8McznzD0Mo9mOhs29gl91rBe
 github.com/openziti/foundation/v2 v2.0.66/go.mod h1:sAtu+ulsxJWJ2iZ16UMBZVocRB3beBpHOE6Wy5RuvJI=
 github.com/openziti/identity v1.0.105 h1:PCMfXejubkzocGorha8ac5QAh3Gzg0fJ7UsECTETww8=
 github.com/openziti/identity v1.0.105/go.mod h1:pHhh5MXSh99McWQGVhgmR5x0KANVfogLcg5mTpRlbVA=
-github.com/openziti/transport/v2 v2.0.176 h1:iDYlYKpMjlZix4bqLyhdOjOwdIhvCiR4T/81GmIF2e8=
-github.com/openziti/transport/v2 v2.0.176/go.mod h1:smarfAPST3TM2HeYQ0D/WeMP23UpgiRTm4ePtC/tEX8=
+github.com/openziti/transport/v2 v2.0.177 h1:x5tqEgJkRdOPp3cqWbSn/61Vtv8w2JXeZ+FEa/PO2zo=
+github.com/openziti/transport/v2 v2.0.177/go.mod h1:smarfAPST3TM2HeYQ0D/WeMP23UpgiRTm4ePtC/tEX8=
 github.com/parallaxsecond/parsec-client-go v0.0.0-20221025095442-f0a77d263cf9 h1:mOvehYivJ4Aqu2CPe3D3lv8jhqOI9/1o0THxJHBE0qw=
 github.com/parallaxsecond/parsec-client-go v0.0.0-20221025095442-f0a77d263cf9/go.mod h1:gLH27qo/dvMhLTVVyMELpe3Tut7sOfkiDg7ZpeqKwsw=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
