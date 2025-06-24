@@ -27,6 +27,7 @@ import (
 	"github.com/openziti/foundation/v2/sequence"
 	"io"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -181,6 +182,10 @@ func (self *multiChannelImpl) GetUnderlayCountsByType() map[string]int {
 		result[underlayType]++
 	}
 	return result
+}
+
+func (self *multiChannelImpl) GetUnderlays() []Underlay {
+	return slices.Clone(self.underlays.Value())
 }
 
 func (self *multiChannelImpl) Send(s Sendable) error {
