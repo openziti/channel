@@ -205,6 +205,16 @@ func (channel *channelImpl) GetUserData() interface{} {
 	return channel.userData
 }
 
+func (channel *channelImpl) GetUnderlays() []Underlay {
+	return []Underlay{channel.underlay}
+}
+
+func (channel *channelImpl) GetUnderlayCountsByType() map[string]int {
+	return map[string]int{
+		"single": 1,
+	}
+}
+
 func (channel *channelImpl) Close() error {
 	if channel.flags.CompareAndSet(flagClosed, false, true) {
 		pfxlog.ContextLogger(channel.Label()).Debug("closing channel")

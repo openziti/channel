@@ -37,13 +37,14 @@ type Channel interface {
 	Headers() map[int32][]byte
 	GetTimeSinceLastRead() time.Duration
 	GetUserData() interface{}
+	GetUnderlays() []Underlay
+	GetUnderlayCountsByType() map[string]int
 }
 
 type MultiChannel interface {
 	Channel
 	UnderlayAcceptor
 	DialUnderlay(factory GroupedUnderlayFactory, underlayType string)
-	GetUnderlayCountsByType() map[string]int
 	GetUnderlayHandler() UnderlayHandler
 }
 
