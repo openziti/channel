@@ -70,12 +70,10 @@ func (self *priorityEnvelopeImpl) WithTimeout(duration time.Duration) TimeoutEnv
 }
 
 func (self *priorityEnvelopeImpl) WithContext(c context.Context) TimeoutEnvelope {
-	ctx, cancelF := context.WithCancel(c)
 	return &envelopeImpl{
 		msg:     self.msg,
 		p:       self.p,
-		context: ctx,
-		cancelF: cancelF,
+		context: c,
 	}
 }
 
@@ -120,6 +118,10 @@ func (self *envelopeImpl) NotifyQueued() {}
 func (self *envelopeImpl) NotifyBeforeWrite() {}
 
 func (self *envelopeImpl) NotifyAfterWrite() {
+	self.CancelF()
+}
+
+func (self *envelopeImpl) CancelF() {
 	if self.cancelF != nil {
 		self.cancelF()
 	}
@@ -194,7 +196,7 @@ func (self *sendWaitEnvelope) WaitForWire(sender Sender) error {
 		return err
 	}
 
-	defer self.cancelF()
+	defer self.CancelF()
 
 	self.errC = make(chan error, 1)
 
@@ -253,7 +255,7 @@ func (self *replyEnvelope) WaitForReply(sender Sender) (*Message, error) {
 		return nil, err
 	}
 
-	defer self.cancelF()
+	defer self.CancelF()
 
 	self.errC = make(chan error, 1)
 	self.replyC = make(chan *Message, 1)
