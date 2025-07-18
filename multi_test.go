@@ -143,6 +143,7 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 	headers := Headers{}
 	headers.PutStringHeader(TypeHeader, "default")
 	headers.PutBoolHeader(IsGroupedHeader, true)
+	headers.PutBoolHeader(IsFirstGroupConnection, true)
 
 	underlay, err := dialer.CreateWithHeaders(time.Second, headers)
 	req.NoError(err)
@@ -170,7 +171,7 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 	}()
 
 	for i := 0; i < 3_000; i++ {
-		// fmt.Printf("iteration %d\n", i)
+		fmt.Printf("iteration %d\n", i)
 		msg := NewMessage(100, []byte{byte(i)})
 		req.NoError(msg.WithTimeout(time.Second).SendAndWaitForWire(priorityCh.GetDefaultSender()))
 		time.Sleep(time.Millisecond)
@@ -281,9 +282,11 @@ func (self *priorityChannelBase) CloseRandom(ch MultiChannel) {
 	mc.lock.Lock()
 	defer mc.lock.Unlock()
 	underlays := mc.underlays.Value()
-	idx := rand.Intn(len(underlays))
-	underlay := underlays[idx]
-	_ = underlay.Close()
+	if len(underlays) > 0 {
+		idx := rand.Intn(len(underlays))
+		underlay := underlays[idx]
+		_ = underlay.Close()
+	}
 }
 
 func NewDialPriorityChannel(dialer *classicDialer, underlay Underlay) PriorityChannel {
