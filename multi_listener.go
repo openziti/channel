@@ -58,6 +58,14 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 			log.WithError(err).Error("error accepting underlay")
 		}
 	} else {
+		if isFirst, _ := Headers(underlay.Headers()).GetBoolHeader(IsFirstGroupConnection); !isFirst {
+			log.Info("no existing channel found for underlay, but isFirstGroupConnection not set, closing connection")
+			if err := underlay.Close(); err != nil {
+				log.Info("error closing underlay")
+			}
+			return
+		}
+
 		log.Info("no existing channel found for underlay")
 		var err error
 		mc, err = self.multiChannelFactory(underlay, func() {
