@@ -513,6 +513,7 @@ func (self *multiChannelImpl) DialUnderlay(factory GroupedUnderlayFactory, under
 	for {
 		if self.IsClosed() {
 			log.Info("multi-underlay channel closed, abandoning dial")
+			return
 		}
 
 		dialTimeout := self.GetOptions().ConnectTimeout
