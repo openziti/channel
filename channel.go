@@ -56,11 +56,14 @@ type Sender interface {
 	// TrySend will send the given Sendable. If the Sender is busy (outgoing message queue is full), it will return
 	// immediately rather than wait. The boolean return indicates whether the message was queued or not
 	TrySend(s Sendable) (bool, error)
+
+	// CloseNotify returns a channel that is closed when the sender is closed
+	CloseNotify() <-chan struct{}
 }
 
 // Sendable encapsulates all the data and callbacks that a Channel requires when sending a Message.
 type Sendable interface {
-	// Msg return the Message to send
+	// Msg returns the Message to send
 	Msg() *Message
 
 	// SetSequence sets a sequence number indicating in which order the message was received

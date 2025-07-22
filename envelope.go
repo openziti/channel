@@ -204,6 +204,8 @@ func (self *sendWaitEnvelope) WaitForWire(sender Sender) error {
 		return err
 	}
 	select {
+	case <-sender.CloseNotify():
+		return ClosedError{}
 	case err := <-self.errC:
 		return err
 	case <-self.context.Done():
@@ -265,6 +267,8 @@ func (self *replyEnvelope) WaitForReply(sender Sender) (*Message, error) {
 	}
 
 	select {
+	case <-sender.CloseNotify():
+		return nil, ClosedError{}
 	case err := <-self.errC:
 		return nil, err
 	case <-self.context.Done():
