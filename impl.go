@@ -137,6 +137,10 @@ func (channel *channelImpl) LogicalName() string {
 	return channel.logicalName
 }
 
+func (channel *channelImpl) CloseNotify() <-chan struct{} {
+	return channel.closeNotify
+}
+
 func (channel *channelImpl) SetLogicalName(logicalName string) {
 	channel.logicalName = logicalName
 }

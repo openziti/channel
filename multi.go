@@ -184,6 +184,10 @@ func (self *multiChannelImpl) GetUnderlayCountsByType() map[string]int {
 	return result
 }
 
+func (self *multiChannelImpl) CloseNotify() <-chan struct{} {
+	return self.closeNotify
+}
+
 func (self *multiChannelImpl) GetUnderlays() []Underlay {
 	return slices.Clone(self.underlays.Value())
 }

@@ -19,6 +19,10 @@ type singleChSender struct {
 	msgC chan<- Sendable
 }
 
+func (self *singleChSender) CloseNotify() <-chan struct{} {
+	return self.ctx.GetCloseNotify()
+}
+
 func (self *singleChSender) TrySend(s Sendable) (bool, error) {
 	if err := s.Context().Err(); err != nil {
 		return false, err
