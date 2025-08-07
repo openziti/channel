@@ -21,16 +21,17 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/v2/concurrenz"
-	"github.com/openziti/foundation/v2/info"
-	"github.com/openziti/foundation/v2/sequence"
 	"io"
 	"net"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/foundation/v2/concurrenz"
+	"github.com/openziti/foundation/v2/info"
+	"github.com/openziti/foundation/v2/sequence"
 )
 
 type MultiChannelConfig struct {
@@ -551,6 +552,11 @@ type underlayConstraint struct {
 type UnderlayConstraints struct {
 	types           map[string]underlayConstraint
 	applyInProgress atomic.Bool
+	lastDial        concurrenz.AtomicValue[time.Time]
+}
+
+func (self *UnderlayConstraints) LastDialTime() time.Time {
+	return self.lastDial.Load()
 }
 
 func (self *UnderlayConstraints) AddConstraint(underlayType string, numDesired int, minAllowed int) {
@@ -585,10 +591,14 @@ func (self *UnderlayConstraints) countsShowValidState(ch MultiChannel, counts ma
 }
 
 func (self *UnderlayConstraints) Apply(ch MultiChannel, factory GroupedUnderlayFactory) {
-	pfxlog.Logger().WithField("conn", ch.Label()).
-		Info("starting constraint check")
+	log := pfxlog.Logger().WithField("conn", ch.Label())
+	log.Info("starting constraint check")
 
 	if ch.IsClosed() {
+		return
+	}
+
+	if !self.CheckStateValid(ch, true) {
 		return
 	}
 
@@ -606,18 +616,22 @@ func (self *UnderlayConstraints) Apply(ch MultiChannel, factory GroupedUnderlayF
 
 		allSatisfied := true
 		for underlayType, constraint := range self.types {
-			pfxlog.Logger().WithField("conn", ch.Label()).
-				WithField("underlayType", underlayType).
+			log.WithField("underlayType", underlayType).
 				WithField("numDesired", constraint.numDesired).
 				WithField("current", counts[underlayType]).
 				Info("checking constraint")
 			if constraint.numDesired > counts[underlayType] {
-				pfxlog.Logger().WithField("conn", ch.Label()).
+				dialElapsed := time.Since(self.lastDial.Load())
+
+				log.WithField("conn", ch.Label()).
 					WithField("underlayType", underlayType).
+					WithField("timeSinceLastDial", dialElapsed.String()).
 					Info("additional connections desired, dialing...")
 
 				allSatisfied = false
+
 				ch.DialUnderlay(factory, underlayType)
+				self.lastDial.Store(time.Now())
 			}
 		}
 
