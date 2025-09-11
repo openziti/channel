@@ -1,6 +1,6 @@
 module github.com/openziti/channel/v4
 
-go 1.23.0
+go 1.24.0
 
 toolchain go1.24.1
 
@@ -8,9 +8,9 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/michaelquigley/pfxlog v0.6.10
-	github.com/openziti/foundation/v2 v2.0.73
-	github.com/openziti/identity v1.0.112
-	github.com/openziti/transport/v2 v2.0.189
+	github.com/openziti/foundation/v2 v2.0.74
+	github.com/openziti/identity v1.0.113
+	github.com/openziti/transport/v2 v2.0.190
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.10.1
@@ -37,8 +37,8 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/term v0.34.0 // indirect
+	golang.org/x/sys v0.36.0 // indirect
+	golang.org/x/term v0.35.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	nhooyr.io/websocket v1.8.17 // indirect
 )
