@@ -338,8 +338,8 @@ github.com/openziti/foundation/v2 v2.0.79 h1:ebD5hMxKR2Sa9NYktTFHtjCb/Y49aJ8y3iN
 github.com/openziti/foundation/v2 v2.0.79/go.mod h1:qaL/xvrjEQn4drHjtRRdfvXMO/aRi+LErQ0QWAxgv7U=
 github.com/openziti/identity v1.0.118 h1:GyIbuabLRHZ+kwQL8voAHnoVzK2U7XcPVqIjZbL2ob8=
 github.com/openziti/identity v1.0.118/go.mod h1:qrKOXWXxTpNGaB8FrlrMyk1Aw3QZYpTzqyj7uEC4cSo=
-github.com/openziti/transport/v2 v2.0.196 h1:v1XwBWX1HMR1z0R+o01NoyS0PU9eEqibI4FvjoTwxAY=
-github.com/openziti/transport/v2 v2.0.196/go.mod h1:zRU/wklJizrrWCKGqlxdH+powV3syTv8hG4heCXoxmg=
+github.com/openziti/transport/v2 v2.0.197 h1:rrBBXNaldsqqx+5zaVnUkUR8UxW+FpBQJ/+VvO67Q3Y=
+github.com/openziti/transport/v2 v2.0.197/go.mod h1:ayUzOV5EMVFCchjeB4euw2/UpkRt+Kr/V7wFjenIzAg=
 github.com/parallaxsecond/parsec-client-go v0.0.0-20221025095442-f0a77d263cf9 h1:mOvehYivJ4Aqu2CPe3D3lv8jhqOI9/1o0THxJHBE0qw=
 github.com/parallaxsecond/parsec-client-go v0.0.0-20221025095442-f0a77d263cf9/go.mod h1:gLH27qo/dvMhLTVVyMELpe3Tut7sOfkiDg7ZpeqKwsw=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
@@ -575,8 +575,8 @@ golang.org/x/net v0.0.0-20210316092652-d523dce5a7f4/go.mod h1:RBQZq4jEuRlivfhVLd
 golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4/go.mod h1:p54w0d4576C0XHj96bSt6lcn1PtDYWL6XObtHCRCNQM=
 golang.org/x/net v0.0.0-20220722155237-a158d28d115b/go.mod h1:XRhObCWvk6IyKnWLug+ECip1KBveYUHfp+8e9klMJ9c=
 golang.org/x/net v0.1.0/go.mod h1:Cx3nUiGt4eDBEyega/BKRp+/AlGL8hYe7U9odMt2Cco=
-golang.org/x/net v0.44.0 h1:evd8IRDyfNBMBTTY5XRF1vaZlD+EmWx6x8PkhR04H/I=
-golang.org/x/net v0.44.0/go.mod h1:ECOoLqd5U3Lhyeyo/QDCEVQ4sNgYsqvCZ722XogGieY=
+golang.org/x/net v0.45.0 h1:RLBg5JKixCy82FtLJpeNlVM0nrSqpCRYzVU1n8kj0tM=
+golang.org/x/net v0.45.0/go.mod h1:ECOoLqd5U3Lhyeyo/QDCEVQ4sNgYsqvCZ722XogGieY=
 golang.org/x/oauth2 v0.0.0-20180821212333-d2e6202438be/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
 golang.org/x/oauth2 v0.0.0-20181017192945-9dcd33a902f4/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
 golang.org/x/oauth2 v0.0.0-20181203162652-d668ce993890/go.mod h1:N/0e6XlmueqKjAGxoOufVs8QHGRruUQn6yWY3a++T0U=
