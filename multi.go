@@ -40,6 +40,8 @@ type MultiChannelConfig struct {
 	UnderlayHandler UnderlayHandler
 	BindHandler     BindHandler
 	Underlay        Underlay
+
+	InjectUnderlayTypeIntoMessages bool
 }
 
 type senderContextImpl struct {
@@ -109,6 +111,8 @@ func NewMultiChannel(config *MultiChannelConfig) (MultiChannel, error) {
 		closeNotify:     config.UnderlayHandler.GetCloseNotify(),
 		underlayHandler: config.UnderlayHandler,
 	}
+
+	impl.flags.Set(flagInjectUnderlayType, config.InjectUnderlayTypeIntoMessages)
 
 	impl.ownerId = config.Underlay.Id()
 	impl.certs.Store(config.Underlay.Certificates())
@@ -495,6 +499,9 @@ func (self *multiChannelImpl) Rxer(underlay Underlay, notifier *CloseNotifier) {
 	log.Debug("started")
 	defer log.Debug("exited")
 
+	underlayType := GetUnderlayType(underlay)
+	injectType := self.flags.IsSet(flagInjectUnderlayType)
+
 	for {
 		m, err := underlay.Rx()
 		if err != nil {
@@ -508,6 +515,9 @@ func (self *multiChannelImpl) Rxer(underlay Underlay, notifier *CloseNotifier) {
 			return
 		}
 
+		if injectType {
+			m.Headers.PutStringHeader(UnderlayTypeHeader, underlayType)
+		}
 		self.Rx(m)
 	}
 }
