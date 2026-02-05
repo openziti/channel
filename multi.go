@@ -602,7 +602,7 @@ func (self *UnderlayConstraints) countsShowValidState(ch MultiChannel, counts ma
 
 func (self *UnderlayConstraints) Apply(ch MultiChannel, factory GroupedUnderlayFactory) {
 	log := pfxlog.Logger().WithField("conn", ch.Label())
-	log.Info("starting constraint check")
+	log.Debug("starting constraint check")
 
 	if ch.IsClosed() {
 		return
@@ -629,7 +629,7 @@ func (self *UnderlayConstraints) Apply(ch MultiChannel, factory GroupedUnderlayF
 			log.WithField("underlayType", underlayType).
 				WithField("numDesired", constraint.numDesired).
 				WithField("current", counts[underlayType]).
-				Info("checking constraint")
+				Debug("checking constraint")
 			if constraint.numDesired > counts[underlayType] {
 				dialElapsed := time.Since(self.lastDial.Load())
 
@@ -646,7 +646,7 @@ func (self *UnderlayConstraints) Apply(ch MultiChannel, factory GroupedUnderlayF
 		}
 
 		if allSatisfied {
-			pfxlog.Logger().WithField("conn", ch.Label()).Info("constraints satisfied")
+			pfxlog.Logger().WithField("conn", ch.Label()).Debug("constraints satisfied")
 			return
 		}
 	}
