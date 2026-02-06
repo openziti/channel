@@ -21,10 +21,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/pkg/errors"
 	"io"
 	"time"
+
+	"github.com/michaelquigley/pfxlog"
+	"github.com/pkg/errors"
 )
 
 /**
@@ -50,6 +51,7 @@ const (
 	IsGroupedHeader                 = 9
 	GroupSecretHeader               = 10
 	IsFirstGroupConnection          = 11
+	UnderlayTypeHeader              = 12
 
 	// Headers in the range 128-255 inclusive will be reflected when creating replies
 	ReflectedHeaderBitMask = 1 << 7

@@ -20,21 +20,23 @@ import (
 	"container/heap"
 	"crypto/x509"
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/foundation/v2/concurrenz"
-	"github.com/openziti/foundation/v2/info"
-	"github.com/openziti/foundation/v2/sequence"
-	"github.com/pkg/errors"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/foundation/v2/concurrenz"
+	"github.com/openziti/foundation/v2/info"
+	"github.com/openziti/foundation/v2/sequence"
+	"github.com/pkg/errors"
 )
 
 const (
-	flagClosed    = 0
-	flagRxStarted = 1
+	flagClosed             = 0
+	flagRxStarted          = 1
+	flagInjectUnderlayType = 2
 )
 
 var connectionSeq = sequence.NewSequence()

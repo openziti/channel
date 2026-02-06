@@ -40,6 +40,8 @@ type MultiChannelConfig struct {
 	UnderlayHandler UnderlayHandler
 	BindHandler     BindHandler
 	Underlay        Underlay
+
+	InjectUnderlayTypeIntoMessages bool
 }
 
 type senderContextImpl struct {
@@ -110,16 +112,20 @@ func NewMultiChannel(config *MultiChannelConfig) (MultiChannel, error) {
 		underlayHandler: config.UnderlayHandler,
 	}
 
+	impl.flags.Set(flagInjectUnderlayType, config.InjectUnderlayTypeIntoMessages)
+
 	impl.ownerId = config.Underlay.Id()
 	impl.certs.Store(config.Underlay.Certificates())
 	impl.headers.Store(config.Underlay.Headers())
 	impl.underlays.Append(config.Underlay)
 
-	if groupSecret := config.Underlay.Headers()[GroupSecretHeader]; len(groupSecret) == 0 {
+	groupSecret := config.Underlay.Headers()[GroupSecretHeader]
+	if len(groupSecret) == 0 {
 		return nil, errors.New("no group secret header found for multi channel")
-	} else {
-		impl.groupSecret = groupSecret
 	}
+	impl.groupSecret = groupSecret
+
+	config.UnderlayHandler.ChannelCreated(impl)
 
 	if err := bind(config.BindHandler, impl); err != nil {
 		for _, u := range impl.underlays.Value() {
@@ -495,6 +501,9 @@ func (self *multiChannelImpl) Rxer(underlay Underlay, notifier *CloseNotifier) {
 	log.Debug("started")
 	defer log.Debug("exited")
 
+	underlayType := GetUnderlayType(underlay)
+	injectType := self.flags.IsSet(flagInjectUnderlayType)
+
 	for {
 		m, err := underlay.Rx()
 		if err != nil {
@@ -508,6 +517,9 @@ func (self *multiChannelImpl) Rxer(underlay Underlay, notifier *CloseNotifier) {
 			return
 		}
 
+		if injectType {
+			m.Headers.PutStringHeader(UnderlayTypeHeader, underlayType)
+		}
 		self.Rx(m)
 	}
 }
@@ -592,7 +604,7 @@ func (self *UnderlayConstraints) countsShowValidState(ch MultiChannel, counts ma
 
 func (self *UnderlayConstraints) Apply(ch MultiChannel, factory GroupedUnderlayFactory) {
 	log := pfxlog.Logger().WithField("conn", ch.Label())
-	log.Info("starting constraint check")
+	log.Debug("starting constraint check")
 
 	if ch.IsClosed() {
 		return
@@ -619,7 +631,7 @@ func (self *UnderlayConstraints) Apply(ch MultiChannel, factory GroupedUnderlayF
 			log.WithField("underlayType", underlayType).
 				WithField("numDesired", constraint.numDesired).
 				WithField("current", counts[underlayType]).
-				Info("checking constraint")
+				Debug("checking constraint")
 			if constraint.numDesired > counts[underlayType] {
 				dialElapsed := time.Since(self.lastDial.Load())
 
@@ -636,7 +648,7 @@ func (self *UnderlayConstraints) Apply(ch MultiChannel, factory GroupedUnderlayF
 		}
 
 		if allSatisfied {
-			pfxlog.Logger().WithField("conn", ch.Label()).Info("constraints satisfied")
+			pfxlog.Logger().WithField("conn", ch.Label()).Debug("constraints satisfied")
 			return
 		}
 	}
