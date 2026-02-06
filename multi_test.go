@@ -19,17 +19,18 @@ package channel
 import (
 	"errors"
 	"fmt"
+	"io"
+	"math/rand"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/goroutines"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/openziti/transport/v2/tcp"
 	"github.com/stretchr/testify/require"
-	"io"
-	"math/rand"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 func Test_MultiUnderlayChannels(t *testing.T) {
@@ -111,7 +112,7 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 		wrapper := &TypeLoggingUnderlay{
 			wrapped: underlay,
 		}
-		underlayHandler := NewListenerPriorityChannel(wrapper)
+		underlayHandler := NewListenerPriorityChannel()
 		return newMultiChannel("listener", underlayHandler, wrapper, closeCallback)
 	}, func(underlay Underlay) error {
 		return errors.New("this implementation only accepts grouped channel")
@@ -185,7 +186,7 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 	req.NoError(asyncErr, "no async errors should have occurred")
 }
 
-func newPriorityChannelBase(underlay Underlay) *priorityChannelBase {
+func newPriorityChannelBase() *priorityChannelBase {
 	senderContext := NewSenderContext()
 
 	defaultMsgChan := make(chan Sendable, 4)
@@ -194,7 +195,6 @@ func newPriorityChannelBase(underlay Underlay) *priorityChannelBase {
 
 	result := &priorityChannelBase{
 		SenderContext:   senderContext,
-		id:              underlay.ConnectionId(),
 		prioritySender:  NewSingleChSender(senderContext, priorityMsgChan),
 		defaultSender:   NewSingleChSender(senderContext, defaultMsgChan),
 		priorityMsgChan: priorityMsgChan,
@@ -205,7 +205,6 @@ func newPriorityChannelBase(underlay Underlay) *priorityChannelBase {
 }
 
 type priorityChannelBase struct {
-	id string
 	SenderContext
 	prioritySender Sender
 	defaultSender  Sender
@@ -214,6 +213,8 @@ type priorityChannelBase struct {
 	defaultMsgChan  chan Sendable
 	retryMsgChan    chan Sendable
 }
+
+func (self *priorityChannelBase) ChannelCreated(MultiChannel) {}
 
 func (self *priorityChannelBase) GetDefaultSender() Sender {
 	return self.defaultSender
@@ -289,9 +290,9 @@ func (self *priorityChannelBase) CloseRandom(ch MultiChannel) {
 	}
 }
 
-func NewDialPriorityChannel(dialer *classicDialer, underlay Underlay) PriorityChannel {
+func NewDialPriorityChannel(dialer *classicDialer, _ Underlay) PriorityChannel {
 	result := &dialPriorityChannel{
-		priorityChannelBase: *newPriorityChannelBase(underlay),
+		priorityChannelBase: *newPriorityChannelBase(),
 		dialer:              dialer,
 	}
 
@@ -351,9 +352,9 @@ func (self *dialPriorityChannel) CreateGroupedUnderlay(groupId string, groupSecr
 	}, nil
 }
 
-func NewListenerPriorityChannel(underlay Underlay) PriorityChannel {
+func NewListenerPriorityChannel() PriorityChannel {
 	result := &listenerPriorityChannel{
-		priorityChannelBase: *newPriorityChannelBase(underlay),
+		priorityChannelBase: *newPriorityChannelBase(),
 	}
 
 	result.constraints.AddConstraint("default", 2, 1)

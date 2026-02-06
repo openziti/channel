@@ -119,11 +119,13 @@ func NewMultiChannel(config *MultiChannelConfig) (MultiChannel, error) {
 	impl.headers.Store(config.Underlay.Headers())
 	impl.underlays.Append(config.Underlay)
 
-	if groupSecret := config.Underlay.Headers()[GroupSecretHeader]; len(groupSecret) == 0 {
+	groupSecret := config.Underlay.Headers()[GroupSecretHeader]
+	if len(groupSecret) == 0 {
 		return nil, errors.New("no group secret header found for multi channel")
-	} else {
-		impl.groupSecret = groupSecret
 	}
+	impl.groupSecret = groupSecret
+
+	config.UnderlayHandler.ChannelCreated(impl)
 
 	if err := bind(config.BindHandler, impl); err != nil {
 		for _, u := range impl.underlays.Value() {
