@@ -135,7 +135,11 @@ func (self CloseHandlerF) HandleClose(ch Channel) {
 type MessageSourceF func(notifer *CloseNotifier) (Sendable, error)
 
 type UnderlayHandler interface {
-	// Start is called after the MultiChannel has been created with the first underlay
+	// ChannelCreated is called after the MultiChannel has been created but before binding happens.
+	// This allows the underlay handler to set the channel, if desired, before binding happens
+	ChannelCreated(channel MultiChannel)
+
+	// Start is called after the MultiChannel has been created with the first underlay and binding is complete.
 	// If this is a dial side, Start may be used to add additional underlays
 	Start(channel MultiChannel)
 
