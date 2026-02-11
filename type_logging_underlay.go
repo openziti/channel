@@ -23,6 +23,7 @@ import (
 	"time"
 )
 
+// TypeLoggingUnderlay wraps an Underlay and logs the content type of each transmitted message.
 type TypeLoggingUnderlay struct {
 	wrapped Underlay
 }

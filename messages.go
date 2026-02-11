@@ -16,6 +16,7 @@
 
 package channel
 
+// Built-in message content types used by the channel protocol.
 const (
 	ContentTypeHelloType           = 0
 	ContentTypePingType            = 1
@@ -26,11 +27,13 @@ const (
 	ContentTypeRaw                 = 6
 )
 
+// Hello is the initial handshake message exchanged when a connection is established.
 type Hello struct {
 	IdToken string
 	Headers map[int32][]byte
 }
 
+// NewHello creates a hello Message with the given identity token and attributes.
 func NewHello(idToken string, attributes map[int32][]byte) *Message {
 	result := NewMessage(ContentTypeHelloType, []byte(idToken))
 	for key, value := range attributes {
@@ -39,6 +42,7 @@ func NewHello(idToken string, attributes map[int32][]byte) *Message {
 	return result
 }
 
+// UnmarshalHello extracts a Hello from a received Message.
 func UnmarshalHello(message *Message) *Hello {
 	return &Hello{
 		IdToken: string(message.Body),
@@ -46,17 +50,20 @@ func UnmarshalHello(message *Message) *Hello {
 	}
 }
 
+// NewResult creates a result Message indicating success or failure with a text message.
 func NewResult(success bool, message string) *Message {
 	msg := NewMessage(ContentTypeResultType, []byte(message))
 	msg.PutBoolHeader(ResultSuccessHeader, success)
 	return msg
 }
 
+// Result is a parsed result message containing a success flag and text.
 type Result struct {
 	Success bool
 	Message string
 }
 
+// UnmarshalResult extracts a Result from a received Message.
 func UnmarshalResult(message *Message) *Result {
 	success, _ := message.GetBoolHeader(ResultSuccessHeader)
 	resultMsg := string(message.Body)

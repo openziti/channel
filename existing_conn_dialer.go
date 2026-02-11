@@ -31,6 +31,7 @@ type existingConnDialer struct {
 	headers map[int32][]byte
 }
 
+// NewExistingConnDialer creates an UnderlayFactory that performs a hello handshake over an existing net.Conn.
 func NewExistingConnDialer(id *identity.TokenId, peer net.Conn, headers map[int32][]byte) UnderlayFactory {
 	return &existingConnDialer{
 		id:      id,

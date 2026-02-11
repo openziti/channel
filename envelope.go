@@ -2,84 +2,15 @@ package channel
 
 import (
 	"context"
+	"time"
+
 	"github.com/michaelquigley/pfxlog"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"time"
 )
-
-type priorityEnvelopeImpl struct {
-	msg *Message
-	p   Priority
-}
-
-func (self *priorityEnvelopeImpl) SetSequence(seq int32) {
-	self.msg.SetSequence(seq)
-}
-
-func (self *priorityEnvelopeImpl) Sequence() int32 {
-	return self.msg.sequence
-}
-
-func (self *priorityEnvelopeImpl) Send(sender Sender) error {
-	return sender.Send(self)
-}
-
-func (self *priorityEnvelopeImpl) ReplyTo(msg *Message) Envelope {
-	self.msg.ReplyTo(msg)
-	return self
-}
-
-func (self *priorityEnvelopeImpl) Msg() *Message {
-	return self.msg
-}
-
-func (self *priorityEnvelopeImpl) Context() context.Context {
-	return self.msg.Context()
-}
-
-func (self *priorityEnvelopeImpl) SendListener() SendListener {
-	return self.msg.SendListener()
-}
-
-func (self *priorityEnvelopeImpl) ReplyReceiver() ReplyReceiver {
-	return nil
-}
-
-func (self *priorityEnvelopeImpl) ToSendable() Sendable {
-	return self
-}
-
-func (self *priorityEnvelopeImpl) Priority() Priority {
-	return self.p
-}
-
-func (self *priorityEnvelopeImpl) WithPriority(p Priority) Envelope {
-	self.p = p
-	return self
-}
-
-func (self *priorityEnvelopeImpl) WithTimeout(duration time.Duration) TimeoutEnvelope {
-	ctx, cancelF := context.WithTimeout(context.Background(), duration)
-	return &envelopeImpl{
-		msg:     self.msg,
-		p:       self.p,
-		context: ctx,
-		cancelF: cancelF,
-	}
-}
-
-func (self *priorityEnvelopeImpl) WithContext(c context.Context) TimeoutEnvelope {
-	return &envelopeImpl{
-		msg:     self.msg,
-		p:       self.p,
-		context: c,
-	}
-}
 
 type envelopeImpl struct {
 	msg     *Message
-	p       Priority
 	context context.Context
 	cancelF context.CancelFunc
 }
@@ -128,15 +59,6 @@ func (self *envelopeImpl) CancelF() {
 }
 
 func (self *envelopeImpl) NotifyErr(error) {}
-
-func (self *envelopeImpl) Priority() Priority {
-	return self.p
-}
-
-func (self *envelopeImpl) WithPriority(p Priority) Envelope {
-	self.p = p
-	return self
-}
 
 func (self *envelopeImpl) Context() context.Context {
 	return self.context
@@ -305,10 +227,6 @@ func (self *errorEnvelope) ReplyTo(*Message) Envelope {
 	return self
 }
 
-func (self *errorEnvelope) Priority() Priority {
-	return Standard
-}
-
 func (self *errorEnvelope) Context() context.Context {
 	return self.ctx
 }
@@ -343,10 +261,6 @@ func (self *errorEnvelope) WithContext(context.Context) TimeoutEnvelope {
 
 func (self *errorEnvelope) Send(Sender) error {
 	return self.ctx.Err()
-}
-
-func (self *errorEnvelope) WithPriority(Priority) Envelope {
-	return self
 }
 
 func NewErrorContext(err error) context.Context {

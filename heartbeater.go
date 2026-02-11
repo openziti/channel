@@ -1,3 +1,19 @@
+/*
+	Copyright NetFoundry Inc.
+
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
+
+	https://www.apache.org/licenses/LICENSE-2.0
+
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
+*/
+
 package channel
 
 import (
@@ -7,12 +23,14 @@ import (
 	"time"
 )
 
+// Heartbeat timing defaults.
 const (
 	DefaultHeartbeatSendInterval  = 10 * time.Second
 	DefaultHeartbeatCheckInterval = time.Second
 	DefaultHeartbeatTimeout       = 30 * time.Second
 )
 
+// HeartbeatOptions configures heartbeat send interval, check interval, and unresponsive timeout.
 type HeartbeatOptions struct {
 	SendInterval             time.Duration `json:"sendInterval"`
 	CheckInterval            time.Duration `json:"checkInterval"`
@@ -20,6 +38,7 @@ type HeartbeatOptions struct {
 	src                      map[interface{}]interface{}
 }
 
+// GetDuration parses a named duration value from the source configuration map.
 func (self *HeartbeatOptions) GetDuration(name string) (*time.Duration, error) {
 	if value, found := self.src[name]; found {
 		if strVal, ok := value.(string); ok {
@@ -35,6 +54,7 @@ func (self *HeartbeatOptions) GetDuration(name string) (*time.Duration, error) {
 	return nil, nil
 }
 
+// DefaultHeartbeatOptions returns HeartbeatOptions with sensible defaults.
 func DefaultHeartbeatOptions() *HeartbeatOptions {
 	return &HeartbeatOptions{
 		SendInterval:             DefaultHeartbeatSendInterval,
@@ -43,6 +63,7 @@ func DefaultHeartbeatOptions() *HeartbeatOptions {
 	}
 }
 
+// LoadHeartbeatOptions parses HeartbeatOptions from a configuration map.
 func LoadHeartbeatOptions(data map[interface{}]interface{}) (*HeartbeatOptions, error) {
 	options := DefaultHeartbeatOptions()
 	options.src = data

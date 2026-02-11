@@ -17,10 +17,11 @@
 package latency
 
 import (
-	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v4"
 	"sync/atomic"
 	"time"
+
+	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/channel/v5"
 )
 
 const (
@@ -32,10 +33,6 @@ type LatencyHandler struct {
 	responses int32
 }
 
-func (h *LatencyHandler) ContentType() int32 {
-	return channel.ContentTypeLatencyType
-}
-
 func (h *LatencyHandler) HandleReceive(msg *channel.Message, ch channel.Channel) {
 	// need to send response in a separate go-routine. We get stuck sending, we'll also pause the receiving side
 	// limit the number of concurrent responses
@@ -44,7 +41,7 @@ func (h *LatencyHandler) HandleReceive(msg *channel.Message, ch channel.Channel)
 			defer atomic.AddInt32(&h.responses, -1)
 			response := channel.NewResult(true, "")
 			response.ReplyTo(msg)
-			if err := response.WithPriority(channel.High).Send(ch); err != nil {
+			if err := response.Send(ch); err != nil {
 				pfxlog.ContextLogger(ch.Label()).WithError(err).Errorf("error sending latency response")
 			}
 		}()
@@ -81,7 +78,7 @@ func ProbeLatencyConfigurable(config *ProbeConfig) {
 
 		request := channel.NewMessage(channel.ContentTypeLatencyType, nil)
 		request.PutUint64Header(probeTime, uint64(time.Now().UnixNano()))
-		response, err := request.WithPriority(channel.High).WithTimeout(config.Timeout).SendForReply(config.Channel)
+		response, err := request.WithTimeout(config.Timeout).SendForReply(config.Channel)
 		if err != nil {
 			log.WithError(err).Error("unexpected error sending latency probe")
 			if config.Channel.IsClosed() {
@@ -129,7 +126,7 @@ func AddLatencyProbe(ch channel.Channel, binding channel.Binding, interval time.
 		interval:      interval,
 		roundTripFreq: roundTripFreq,
 	}
-	binding.AddTypedReceiveHandler(probe)
+	binding.AddReceiveHandler(channel.ContentTypeLatencyResponseType, probe)
 	go probe.run()
 }
 
@@ -139,10 +136,6 @@ type latencyProbe struct {
 	interval      time.Duration
 	roundTripFreq uint8
 	count         uint8
-}
-
-func (self *latencyProbe) ContentType() int32 {
-	return channel.ContentTypeLatencyResponseType
 }
 
 func (self *latencyProbe) HandleReceive(m *channel.Message, _ channel.Channel) {
@@ -240,7 +233,7 @@ func AddLatencyProbeResponder(binding channel.Binding) {
 		ch:              binding.GetChannel(),
 		responseChannel: make(chan *channel.Message, 1),
 	}
-	binding.AddTypedReceiveHandler(responder)
+	binding.AddReceiveHandler(channel.ContentTypeLatencyType, responder)
 	go responder.responseSender()
 }
 
@@ -248,10 +241,6 @@ func AddLatencyProbeResponder(binding channel.Binding) {
 type Responder struct {
 	responseChannel chan *channel.Message
 	ch              channel.Channel
-}
-
-func (self *Responder) ContentType() int32 {
-	return channel.ContentTypeLatencyType
 }
 
 func (self *Responder) HandleReceive(msg *channel.Message, _ channel.Channel) {
@@ -276,7 +265,7 @@ func (self *Responder) responseSender() {
 	for {
 		select {
 		case response := <-self.responseChannel:
-			if err := response.WithPriority(channel.High).Send(self.ch); err != nil {
+			if err := response.Send(self.ch); err != nil {
 				log.WithError(err).Error("error sending latency response")
 				if self.ch.IsClosed() {
 					return

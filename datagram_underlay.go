@@ -28,6 +28,7 @@ import (
 
 type readPacketFunction func(buf []byte) (*Message, error)
 
+// DatagramUnderlay is an Underlay implementation for packet-oriented (datagram) transports like DTLS.
 type DatagramUnderlay struct {
 	id           string
 	connectionId string
@@ -150,6 +151,8 @@ func (self *DatagramUnderlay) rxHello() (*Message, error) {
 	return self.Rx()
 }
 
+// DatagramMessageStrategy is a MessageStrategy that uses MarshalV2WithRaw for marshalling
+// and a custom PacketMessageProducer for reading.
 type DatagramMessageStrategy PacketMessageProducer
 
 func (self DatagramMessageStrategy) GetMarshaller() MessageMarshaller {

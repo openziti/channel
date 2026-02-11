@@ -35,6 +35,7 @@ type classicDialer struct {
 	transportConfig transport.Configuration
 }
 
+// DialerConfig holds configuration for creating a classic dialer.
 type DialerConfig struct {
 	Identity        *identity.TokenId
 	Endpoint        transport.Address
@@ -44,6 +45,7 @@ type DialerConfig struct {
 	TransportConfig transport.Configuration
 }
 
+// NewClassicDialer creates a DialUnderlayFactory that dials using the classic transport protocol.
 func NewClassicDialer(cfg DialerConfig) DialUnderlayFactory {
 	result := &classicDialer{
 		identity:        cfg.Identity,

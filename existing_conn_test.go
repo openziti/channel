@@ -1,13 +1,30 @@
+/*
+	Copyright NetFoundry Inc.
+
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
+
+	https://www.apache.org/licenses/LICENSE-2.0
+
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
+*/
+
 package channel
 
 import (
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/identity"
-	"github.com/stretchr/testify/require"
 	"net"
 	"testing"
 	"time"
+
+	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/identity"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExistingConnWriteAndReply(t *testing.T) {
@@ -36,7 +53,7 @@ func TestExistingConnWriteAndReply(t *testing.T) {
 				return nil
 			})
 			chListener := NewExistingConnListener(&identity.TokenId{Token: "listener"}, c, nil)
-			_, err = NewChannel("existing.server", chListener, bindHandler, nil)
+			_, err = NewSingleChannel("existing.server", chListener, bindHandler, nil)
 			req.NoError(err)
 		}
 	}()
@@ -49,7 +66,7 @@ func TestExistingConnWriteAndReply(t *testing.T) {
 	req.NoError(err)
 
 	dialer := NewExistingConnDialer(&identity.TokenId{Token: "dialer"}, conn, nil)
-	ch, err := NewChannel("existing.client", dialer, nil, options)
+	ch, err := NewSingleChannel("existing.client", dialer, nil, options)
 	req.NoError(err)
 
 	defer func() { req.NoError(ch.Close()) }()

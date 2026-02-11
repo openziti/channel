@@ -20,58 +20,12 @@ import (
 	"crypto/x509"
 )
 
-// Binding is used to add handlers to Channel.
-//
-// NOTE: It is intended that the Add* methods are used at initial channel setup, and not invoked on an in-service
-// Channel. The Binding should not be retained once the channel setup is complete
-type Binding interface {
-	Bind(h BindHandler) error
-	AddPeekHandler(h PeekHandler)
-	AddTransformHandler(h TransformHandler)
-	AddReceiveHandler(contentType int32, h ReceiveHandler)
-	AddReceiveHandlerF(contentType int32, h ReceiveHandlerF)
-	AddTypedReceiveHandler(h TypedReceiveHandler)
-	AddErrorHandler(h ErrorHandler)
-	AddCloseHandler(h CloseHandler)
-	SetUserData(data interface{})
-	GetUserData() interface{}
-	GetChannel() Channel
-}
-
-type BindHandler interface {
-	BindChannel(binding Binding) error
-}
-
-type BindHandlerF func(binding Binding) error
-
-func (f BindHandlerF) BindChannel(binding Binding) error {
-	return f(binding)
-}
-
-// BindHandlers takes the given handlers and returns a BindHandler which
-// runs the handlers one at a time, returning an error as soon as
-// an error is encountered, or nil, if no errors are encountered.
-func BindHandlers(handlers ...BindHandler) BindHandler {
-	if len(handlers) == 1 {
-		return handlers[0]
-	}
-
-	return BindHandlerF(func(binding Binding) error {
-		for _, handler := range handlers {
-			if handler != nil {
-				if err := handler.BindChannel(binding); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	})
-}
-
+// ConnectionHandler handles new incoming connections during the hello/handshake phase.
 type ConnectionHandler interface {
 	HandleConnection(hello *Hello, certificates []*x509.Certificate) error
 }
 
+// PeekHandler observes messages as they flow through the channel without modifying them.
 type PeekHandler interface {
 	Connect(ch Channel, remoteAddress string)
 	Rx(m *Message, ch Channel)
@@ -79,90 +33,68 @@ type PeekHandler interface {
 	Close(ch Channel)
 }
 
+// TransformHandler can modify messages as they flow through the channel.
 type TransformHandler interface {
 	Rx(m *Message, ch Channel)
 	Tx(m *Message, ch Channel)
 }
 
+// ReceiveHandler handles received messages for a specific content type.
 type ReceiveHandler interface {
 	HandleReceive(m *Message, ch Channel)
 }
 
-type TypedReceiveHandler interface {
-	ContentType() int32
-	ReceiveHandler
-}
-
+// ReceiveHandlerF is the function form of ReceiveHandler.
 type ReceiveHandlerF func(m *Message, ch Channel)
 
 func (self ReceiveHandlerF) HandleReceive(m *Message, ch Channel) {
 	self(m, ch)
 }
 
-type AsyncFunctionReceiveAdapter struct {
-	Type    int32
-	Handler ReceiveHandlerF
+// MsgReceiveHandler handles received messages without channel context.
+type MsgReceiveHandler interface {
+	HandleReceive(m *Message)
 }
 
-func (adapter *AsyncFunctionReceiveAdapter) ContentType() int32 {
-	return adapter.Type
+// MsgReceiveHandlerF is the function form of MsgReceiveHandler.
+type MsgReceiveHandlerF func(m *Message)
+
+func (self MsgReceiveHandlerF) HandleReceive(m *Message) {
+	self(m)
 }
 
-func (adapter *AsyncFunctionReceiveAdapter) HandleReceive(m *Message, ch Channel) {
-	go adapter.Handler(m, ch)
+// TypedReceiveHandler is a receive handler that gets typed senders access.
+type TypedReceiveHandler[S Senders] interface {
+	HandleReceive(m *Message, ch Channel, senders S)
 }
 
+// TypedReceiveHandlerF is the function form of TypedReceiveHandler.
+type TypedReceiveHandlerF[S Senders] func(m *Message, ch Channel, senders S)
+
+func (self TypedReceiveHandlerF[S]) HandleReceive(m *Message, ch Channel, senders S) {
+	self(m, ch, senders)
+}
+
+// ErrorHandler handles errors that occur during channel operations.
 type ErrorHandler interface {
 	HandleError(err error, ch Channel)
 }
 
+// ErrorHandlerF is the function form of ErrorHandler.
 type ErrorHandlerF func(err error, ch Channel)
 
 func (self ErrorHandlerF) HandleError(err error, ch Channel) {
 	self(err, ch)
 }
 
+// CloseHandler is notified when a channel closes.
 type CloseHandler interface {
 	HandleClose(ch Channel)
 }
 
+// CloseHandlerF is the function form of CloseHandler.
 type CloseHandlerF func(ch Channel)
 
 func (self CloseHandlerF) HandleClose(ch Channel) {
 	self(ch)
-}
-
-type MessageSourceF func(notifer *CloseNotifier) (Sendable, error)
-
-type UnderlayHandler interface {
-	// ChannelCreated is called after the MultiChannel has been created but before binding happens.
-	// This allows the underlay handler to set the channel, if desired, before binding happens
-	ChannelCreated(channel MultiChannel)
-
-	// Start is called after the MultiChannel has been created with the first underlay and binding is complete.
-	// If this is a dial side, Start may be used to add additional underlays
-	Start(channel MultiChannel)
-
-	// GetMessageSource returns the message source for the given underlay. In general this will
-	// check the type in the underlay headers and use that to figure out which go channels
-	// to read from
-	GetMessageSource(underlay Underlay) MessageSourceF
-
-	// HandleTxFailed is called when an underlay write fails. This allows the message to
-	// be re-queued if the channel semantic allow.
-	HandleTxFailed(underlay Underlay, sendable Sendable) bool
-
-	// HandleUnderlayClose is called when an underlay closes. This may cause the multi channel to be
-	// closed if it no longer has enough underlays to meet its requirements, or may intitiate
-	// dialing addition underlays
-	HandleUnderlayClose(channel MultiChannel, underlay Underlay)
-
-	// HandleUnderlayAccepted is call when an underlay is added to the multi-underlay channel
-	HandleUnderlayAccepted(channel MultiChannel, underlay Underlay)
-
-	// GetDefaultSender returns the default sender for the underlay
-	GetDefaultSender() Sender
-
-	// GetCloseNotify returns the chan used to signal that the channel is closed
-	GetCloseNotify() chan struct{}
 }
