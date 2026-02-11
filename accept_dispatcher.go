@@ -28,6 +28,7 @@ type UnderlayAcceptor interface {
 	AcceptUnderlay(u Underlay) error
 }
 
+// UnderlayDispatcherConfig holds configuration for an UnderlayDispatcher.
 type UnderlayDispatcherConfig struct {
 	Listener        UnderlayListener
 	ConnectTimeout  time.Duration
@@ -44,6 +45,7 @@ type UnderlayDispatcher struct {
 	defaultAcceptor UnderlayAcceptor
 }
 
+// NewUnderlayDispatcher creates a new UnderlayDispatcher from the given config.
 func NewUnderlayDispatcher(config UnderlayDispatcherConfig) *UnderlayDispatcher {
 	return &UnderlayDispatcher{
 		listener:        config.Listener,
@@ -53,6 +55,7 @@ func NewUnderlayDispatcher(config UnderlayDispatcherConfig) *UnderlayDispatcher 
 	}
 }
 
+// Run accepts underlays in a loop, dispatching each to the appropriate acceptor based on TypeHeader.
 func (self *UnderlayDispatcher) Run() {
 	log := pfxlog.Logger()
 	log.Info("started")

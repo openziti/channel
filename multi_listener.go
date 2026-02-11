@@ -19,20 +19,29 @@ package channel
 import (
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/michaelquigley/pfxlog"
 )
 
-type MultiChannelFactory func(underlay Underlay, closeCallback func()) (MultiChannel, error)
+// Factory creates a new multi-underlay Channel from the first incoming underlay.
+// The closeCallback should be called when the channel is closed to remove it from the listener.
+type Factory func(underlay Underlay, closeCallback func()) (Channel, error)
+
+// UngroupedChannelFallback handles incoming underlays that are not part of a grouped connection.
 type UngroupedChannelFallback func(underlay Underlay) error
 
+// MultiListener routes incoming underlays to existing channels or creates new ones.
+// Grouped underlays are matched by connection ID; ungrouped ones are passed to the fallback.
 type MultiListener struct {
-	channels                 map[string]MultiChannel
+	channels                 map[string]Channel
 	lock                     sync.Mutex
-	multiChannelFactory      MultiChannelFactory
+	multiChannelFactory      Factory
 	ungroupedChannelFallback UngroupedChannelFallback
+	createNotifiers          map[string]chan struct{}
 }
 
+// AcceptUnderlay routes an incoming underlay to an existing channel or creates a new one.
 func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 	isGrouped, _ := Headers(underlay.Headers()).GetBoolHeader(IsGroupedHeader)
 
@@ -54,13 +63,55 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 	chId := underlay.ConnectionId()
 	isFirst, _ := Headers(underlay.Headers()).GetBoolHeader(IsFirstGroupConnection)
 
-	self.lock.Lock()
-	mc, ok := self.channels[chId]
-	self.lock.Unlock()
+	var ch Channel
+	channelExists := false
+	var createLockNotifier chan struct{}
 
-	if ok {
+	done := false
+	for !done {
+		var waitFor chan struct{}
+		self.lock.Lock()
+
+		ch, channelExists = self.channels[chId]
+		if channelExists {
+			done = true
+		} else {
+			var createLockExists bool
+			waitFor, createLockExists = self.createNotifiers[chId]
+			if !createLockExists {
+				createLockNotifier = make(chan struct{})
+				self.createNotifiers[chId] = createLockNotifier
+				done = true
+			}
+		}
+		self.lock.Unlock()
+		if waitFor != nil {
+			select {
+			case <-waitFor:
+			case <-time.After(time.Second):
+				// if we time out waiting for the channel to be created, there's something wrong,
+				// close the underlay and hope it comes in with a new id
+				log.Warn("timed out waiting for concurrent channel create on same id")
+				if err := underlay.Close(); err != nil {
+					log.WithError(err).Error("error closing underlay")
+				}
+				return
+			}
+		}
+	}
+
+	if createLockNotifier != nil {
+		defer func() {
+			self.lock.Lock()
+			delete(self.createNotifiers, chId)
+			close(createLockNotifier)
+			self.lock.Unlock()
+		}()
+	}
+
+	if channelExists {
 		log.Info("found existing channel for underlay")
-		if err := mc.AcceptUnderlay(underlay); err != nil {
+		if err := ch.AcceptUnderlay(underlay); err != nil {
 			log.WithError(err).Error("error accepting underlay")
 		}
 	} else {
@@ -74,11 +125,11 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 
 		log.Info("no existing channel found for underlay")
 		var err error
-		mc, err = self.multiChannelFactory(underlay, func() {
+		ch, err = self.multiChannelFactory(underlay, func() {
 			self.CloseChannel(chId)
 		})
 
-		if mc == nil && err == nil {
+		if ch == nil && err == nil {
 			err = errors.New("multi-channel factory returned nil")
 		}
 
@@ -89,23 +140,26 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 			}
 		} else {
 			self.lock.Lock()
-			self.channels[chId] = mc
+			self.channels[chId] = ch
 			self.lock.Unlock()
 		}
 	}
 }
 
+// CloseChannel removes the channel with the given ID from the listener's map.
 func (self *MultiListener) CloseChannel(chId string) {
 	self.lock.Lock()
 	delete(self.channels, chId)
 	self.lock.Unlock()
 }
 
-func NewMultiListener(channelF MultiChannelFactory, fallback UngroupedChannelFallback) *MultiListener {
+// NewMultiListener creates a MultiListener with the given channel factory and ungrouped fallback.
+func NewMultiListener(channelF Factory, fallback UngroupedChannelFallback) *MultiListener {
 	result := &MultiListener{
-		channels:                 make(map[string]MultiChannel),
+		channels:                 make(map[string]Channel),
 		multiChannelFactory:      channelF,
 		ungroupedChannelFallback: fallback,
+		createNotifiers:          make(map[string]chan struct{}),
 	}
 	return result
 }

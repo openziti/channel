@@ -71,6 +71,7 @@ func (s stringError) Error() string {
 
 const BadMagicNumberError = stringError("protocol error: invalid header")
 
+// MessageHeader contains the metadata for a channel message: content type, sequence, and headers.
 type MessageHeader struct {
 	ContentType int32
 	sequence    int32
@@ -190,6 +191,7 @@ func (header *MessageHeader) GetStringToStringMapHeader(key int32) (map[string]s
 	return header.Headers.GetStringToStringMapHeader(key)
 }
 
+// Headers is a map of integer keys to byte-slice values, used for message metadata.
 type Headers map[int32][]byte
 
 func (self Headers) PutUint64Header(key int32, value uint64) {
@@ -317,6 +319,7 @@ func (self Headers) GetStringToStringMapHeader(key int32) (map[string]string, bo
 	return v, true, err
 }
 
+// NewMessage creates a new Message with the given content type and body.
 func NewMessage(contentType int32, body []byte) *Message {
 	return &Message{
 		MessageHeader: MessageHeader{
@@ -328,6 +331,7 @@ func NewMessage(contentType int32, body []byte) *Message {
 	}
 }
 
+// Message is a content-typed, sequenced message with headers and a body, suitable for wire transmission.
 type Message struct {
 	MessageHeader
 	Body []byte
@@ -357,15 +361,10 @@ func (m *Message) Msg() *Message {
 	return m
 }
 
-func (m *Message) WithPriority(p Priority) Envelope {
-	return &priorityEnvelopeImpl{msg: m, p: p}
-}
-
 func (m *Message) WithTimeout(duration time.Duration) TimeoutEnvelope {
 	ctx, cancelF := context.WithTimeout(context.Background(), duration)
 	return &envelopeImpl{
 		msg:     m,
-		p:       Standard,
 		context: ctx,
 		cancelF: cancelF,
 	}
@@ -374,17 +373,12 @@ func (m *Message) WithTimeout(duration time.Duration) TimeoutEnvelope {
 func (m *Message) WithContext(c context.Context) TimeoutEnvelope {
 	return &envelopeImpl{
 		msg:     m,
-		p:       Standard,
 		context: c,
 	}
 }
 
 func (m *Message) Context() context.Context {
 	return context.Background()
-}
-
-func (m *Message) Priority() Priority {
-	return Standard
 }
 
 func (m *Message) ReplyTo(o *Message) Envelope {
@@ -430,6 +424,7 @@ const dataSectionV2 = 20
 
 var magicV3 = []byte{0x03, 0x06, 0x09, 0x0d}
 
+// UnsupportedVersionError indicates the remote side does not support the requested protocol version.
 type UnsupportedVersionError struct {
 	supportedVersions []uint32
 }
@@ -661,6 +656,7 @@ func readUint32(data []byte) uint32 {
 	return binary.LittleEndian.Uint32(data)
 }
 
+// WriteUnknownVersionResponse sends a version negotiation response listing locally supported versions.
 func WriteUnknownVersionResponse(writer io.Writer) {
 	data := new(bytes.Buffer)
 	data.Write(magicUnknownVersion)
@@ -712,6 +708,7 @@ func readUnknownVersionResponse(initial []byte, reader io.Reader) error {
 	return UnsupportedVersionError{supportedVersions: supported}
 }
 
+// GetRetryVersion extracts a compatible protocol version from an UnsupportedVersionError, if present.
 func GetRetryVersion(err error) (uint32, bool) {
 	return getRetryVersionFor(err, 2, 2)
 }
@@ -735,6 +732,7 @@ func getRetryVersionFor(err error, defaultVersion uint32, localVersions ...uint3
 	return defaultVersion, false
 }
 
+// DecodeString reads a length-prefixed string from a byte slice, returning the remaining bytes and the string.
 func DecodeString(t string, b []byte) ([]byte, string, error) {
 	if len(b) < 4 {
 		return nil, "", fmt.Errorf("invalid string in %s, not enough bytes for string length", t)
@@ -752,6 +750,7 @@ func DecodeString(t string, b []byte) ([]byte, string, error) {
 	return b, s, nil
 }
 
+// EncodeStringSlice encodes a string slice into a length-prefixed binary format.
 func EncodeStringSlice(strSlice []string) []byte {
 	if len(strSlice) == 0 {
 		return nil
@@ -777,6 +776,7 @@ func EncodeStringSlice(strSlice []string) []byte {
 	return result
 }
 
+// DecodeStringSlice decodes a binary-encoded string slice.
 func DecodeStringSlice(b []byte) ([]string, error) {
 	if len(b) == 0 {
 		return nil, nil
@@ -807,6 +807,7 @@ func DecodeStringSlice(b []byte) ([]string, error) {
 	return result, nil
 }
 
+// EncodeU32ToBytesMap encodes a uint32-to-bytes map into a length-prefixed binary format.
 func EncodeU32ToBytesMap(m map[uint32][]byte) []byte {
 	if len(m) == 0 {
 		return nil
@@ -833,6 +834,7 @@ func EncodeU32ToBytesMap(m map[uint32][]byte) []byte {
 	return result
 }
 
+// DecodeU32ToBytesMap decodes a binary-encoded uint32-to-bytes map.
 func DecodeU32ToBytesMap(b []byte) (map[uint32][]byte, error) {
 	if len(b) == 0 {
 		return nil, nil
@@ -878,6 +880,7 @@ func DecodeU32ToBytesMap(b []byte) (map[uint32][]byte, error) {
 	return result, nil
 }
 
+// EncodeStringToStringMap encodes a string-to-string map into a length-prefixed binary format.
 func EncodeStringToStringMap(m map[string]string) []byte {
 	if len(m) == 0 {
 		return nil
@@ -907,6 +910,7 @@ func EncodeStringToStringMap(m map[string]string) []byte {
 	return result
 }
 
+// DecodeStringToStringMap decodes a binary-encoded string-to-string map.
 func DecodeStringToStringMap(b []byte) (map[string]string, error) {
 	if len(b) == 0 {
 		return nil, nil
@@ -943,6 +947,8 @@ func DecodeStringToStringMap(b []byte) (map[string]string, error) {
 	return result, nil
 }
 
+// MarshalV2WithRaw marshals a message using V2 format, except for ContentTypeRaw messages
+// which are sent as raw body bytes without framing.
 func MarshalV2WithRaw(m *Message) ([]byte, error) {
 	if m.ContentType == ContentTypeRaw {
 		return m.Body, nil

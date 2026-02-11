@@ -24,16 +24,23 @@ import (
 	"time"
 )
 
+// MessageStrategy provides pluggable message serialization and deserialization.
 type MessageStrategy interface {
 	GetMarshaller() MessageMarshaller
 	GetStreamProducer() StreamMessageProducer
 	GetPacketProducer() PacketMessageProducer
 }
 
+// MessageMarshaller serializes a Message into bytes for transmission.
 type MessageMarshaller func(m *Message) ([]byte, error)
+
+// StreamMessageProducer reads a Message from a stream-oriented reader.
 type StreamMessageProducer func(r io.Reader) (*Message, error)
+
+// PacketMessageProducer reads a Message from a packet buffer.
 type PacketMessageProducer func(b []byte) (*Message, error)
 
+// Options configures channel behavior including queue sizes, timeouts, and message strategy.
 type Options struct {
 	OutQueueSize int
 	ConnectOptions
@@ -41,6 +48,7 @@ type Options struct {
 	MessageStrategy MessageStrategy
 }
 
+// DefaultOptions returns Options with sensible defaults.
 func DefaultOptions() *Options {
 	return &Options{
 		OutQueueSize:   DefaultOutQueueSize,
@@ -48,6 +56,7 @@ func DefaultOptions() *Options {
 	}
 }
 
+// DefaultConnectOptions returns ConnectOptions with sensible defaults.
 func DefaultConnectOptions() ConnectOptions {
 	return ConnectOptions{
 		MaxQueuedConnects:      DefaultQueuedConnects,
@@ -56,6 +65,7 @@ func DefaultConnectOptions() ConnectOptions {
 	}
 }
 
+// LoadOptions parses channel Options from a configuration map.
 func LoadOptions(data map[interface{}]interface{}) (*Options, error) {
 	options := DefaultOptions()
 
@@ -106,12 +116,14 @@ func (o Options) String() string {
 	return string(data)
 }
 
+// ConnectOptions controls connection acceptance limits and timeouts.
 type ConnectOptions struct {
 	MaxQueuedConnects      int
 	MaxOutstandingConnects int
 	ConnectTimeout         time.Duration
 }
 
+// Validate checks that all connect options are within acceptable bounds.
 func (co *ConnectOptions) Validate() error {
 	if err := co.validateConnectTimeout(); err != nil {
 		return err
@@ -157,6 +169,7 @@ func (co *ConnectOptions) validateConnectTimeout() error {
 	return nil
 }
 
+// MultiChannelOptions configures multi-underlay channels with connect, write, and message options.
 type MultiChannelOptions struct {
 	ConnectOptions
 	WriteTimeout    time.Duration

@@ -19,13 +19,14 @@ package channel
 import (
 	"fmt"
 	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v4/trace"
-	"github.com/openziti/channel/v4/trace/pb"
+	"github.com/openziti/channel/v5/trace"
+	"github.com/openziti/channel/v5/trace/pb"
 	"github.com/sirupsen/logrus"
 	"os"
 	"time"
 )
 
+// TraceHandler is a PeekHandler that writes channel message traces to a file.
 type TraceHandler struct {
 	f         *os.File
 	id        string
@@ -33,6 +34,7 @@ type TraceHandler struct {
 	logTraces bool
 }
 
+// NewTraceHandler creates a TraceHandler that writes trace output to the given file path.
 func NewTraceHandler(path string, id string) (*TraceHandler, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
@@ -46,6 +48,7 @@ func NewTraceHandler(path string, id string) (*TraceHandler, error) {
 	}, nil
 }
 
+// AddDecoder registers a message decoder for trace output formatting.
 func (h *TraceHandler) AddDecoder(decoder TraceMessageDecoder) {
 	h.decoders = append(h.decoders, decoder)
 }

@@ -23,15 +23,21 @@ import (
 	"sort"
 )
 
+// TraceMessageDecoder decodes a Message into a JSON byte representation for tracing.
 type TraceMessageDecoder interface {
 	Decode(msg *Message) ([]byte, bool)
 }
 
+// TraceMessageDecode is a map of trace metadata fields, serializable to JSON.
 type TraceMessageDecode map[string]interface{}
 
+// DecoderFieldName is the JSON key for the decoder name in trace output.
 const DecoderFieldName = "__decoder__"
+
+// MessageFieldName is the JSON key for the message type name in trace output.
 const MessageFieldName = "__message__"
 
+// NewTraceMessageDecode creates a TraceMessageDecode with the decoder and message type pre-populated.
 func NewTraceMessageDecode(decoder, message string) TraceMessageDecode {
 	meta := make(map[string]interface{})
 	meta[DecoderFieldName] = decoder
@@ -39,6 +45,7 @@ func NewTraceMessageDecode(decoder, message string) TraceMessageDecode {
 	return meta
 }
 
+// MarshalTraceMessageDecode serializes the trace metadata to JSON.
 func (d TraceMessageDecode) MarshalTraceMessageDecode() ([]byte, error) {
 	data, err := json.Marshal(d)
 	if err != nil {
@@ -47,6 +54,7 @@ func (d TraceMessageDecode) MarshalTraceMessageDecode() ([]byte, error) {
 	return data, nil
 }
 
+// MarshalResult serializes the trace metadata to JSON, returning (nil, true) on error.
 func (d TraceMessageDecode) MarshalResult() ([]byte, bool) {
 	data, err := json.Marshal(d)
 	if err != nil {
