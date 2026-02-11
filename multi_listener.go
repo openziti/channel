@@ -17,8 +17,9 @@
 package channel
 
 import (
-	"github.com/michaelquigley/pfxlog"
 	"sync"
+
+	"github.com/michaelquigley/pfxlog"
 )
 
 type MultiChannelFactory func(underlay Underlay, closeCallback func()) (MultiChannel, error)
@@ -47,6 +48,7 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 	}
 
 	chId := underlay.ConnectionId()
+	isFirst, _ := Headers(underlay.Headers()).GetBoolHeader(IsFirstGroupConnection)
 
 	self.lock.Lock()
 	mc, ok := self.channels[chId]
@@ -58,7 +60,7 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 			log.WithError(err).Error("error accepting underlay")
 		}
 	} else {
-		if isFirst, _ := Headers(underlay.Headers()).GetBoolHeader(IsFirstGroupConnection); !isFirst {
+		if !isFirst {
 			log.Info("no existing channel found for underlay, but isFirstGroupConnection not set, closing connection")
 			if err := underlay.Close(); err != nil {
 				log.Info("error closing underlay")
