@@ -139,9 +139,8 @@ func NewMultiChannel(config *MultiChannelConfig) (MultiChannel, error) {
 	}
 
 	impl.startMultiplex(config.Underlay)
-	go impl.underlayHandler.Start(impl)
-
 	impl.underlayHandler.HandleUnderlayAccepted(impl, config.Underlay)
+	go impl.underlayHandler.Start(impl)
 
 	return impl, nil
 }
@@ -563,12 +562,17 @@ type underlayConstraint struct {
 
 type UnderlayConstraints struct {
 	types           map[string]underlayConstraint
+	minTotal        uint32
 	applyInProgress atomic.Bool
 	lastDial        concurrenz.AtomicValue[time.Time]
 }
 
 func (self *UnderlayConstraints) LastDialTime() time.Time {
 	return self.lastDial.Load()
+}
+
+func (self *UnderlayConstraints) SetMinTotal(minTotal uint32) {
+	self.minTotal = minTotal
 }
 
 func (self *UnderlayConstraints) AddConstraint(underlayType string, numDesired int, minAllowed int) {
@@ -599,6 +603,26 @@ func (self *UnderlayConstraints) countsShowValidState(ch MultiChannel, counts ma
 			return false
 		}
 	}
+
+	totalCount := 0
+	for _, count := range counts {
+		totalCount += count
+	}
+
+	if uint32(totalCount) < self.minTotal {
+		if close {
+			pfxlog.Logger().WithField("conn", ch.LogicalName()).
+				WithField("channelId", ch.ConnectionId()).
+				WithField("label", ch.Label()).
+				WithField("underlays", counts).
+				Info("not enough total open underlays, closing multi-underlay channel")
+			if err := ch.Close(); err != nil {
+				pfxlog.Logger().WithError(err).Error("error closing underlay")
+			}
+		}
+		return false
+	}
+
 	return true
 }
 
