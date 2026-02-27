@@ -17,6 +17,7 @@
 package channel
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/michaelquigley/pfxlog"
@@ -42,7 +43,10 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 
 	if !isGrouped {
 		if err := self.ungroupedChannelFallback(underlay); err != nil {
-			log.WithError(err).Errorf("failed to create channel")
+			log.WithError(err).Error("failed to create channel")
+			if closeErr := underlay.Close(); closeErr != nil {
+				log.WithError(closeErr).Error("error closing underlay")
+			}
 		}
 		return
 	}
@@ -63,7 +67,7 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 		if !isFirst {
 			log.Info("no existing channel found for underlay, but isFirstGroupConnection not set, closing connection")
 			if err := underlay.Close(); err != nil {
-				log.Info("error closing underlay")
+				log.WithError(err).Error("error closing underlay")
 			}
 			return
 		}
@@ -74,14 +78,19 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 			self.CloseChannel(chId)
 		})
 
-		if mc != nil {
-			if err != nil {
-				log.WithError(err).Errorf("failed to create multi-underlay channel")
-			} else {
-				self.lock.Lock()
-				self.channels[chId] = mc
-				self.lock.Unlock()
+		if mc == nil && err == nil {
+			err = errors.New("multi-channel factory returned nil")
+		}
+
+		if err != nil {
+			log.WithError(err).Error("failed to create multi-underlay channel")
+			if closeErr := underlay.Close(); closeErr != nil {
+				log.WithError(closeErr).Error("error closing underlay")
 			}
+		} else {
+			self.lock.Lock()
+			self.channels[chId] = mc
+			self.lock.Unlock()
 		}
 	}
 }
