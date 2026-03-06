@@ -22,7 +22,6 @@ import (
 	"github.com/openziti/transport/v2"
 	"github.com/openziti/transport/v2/tcp"
 	"github.com/openziti/transport/v2/tls"
-	"github.com/openziti/transport/v2/transwarp"
 	"github.com/openziti/transport/v2/wss"
 	"github.com/sirupsen/logrus"
 )
@@ -30,7 +29,6 @@ import (
 func init() {
 	transport.AddAddressParser(tcp.AddressParser{})
 	transport.AddAddressParser(tls.AddressParser{})
-	transport.AddAddressParser(transwarp.AddressParser{})
 	transport.AddAddressParser(wss.AddressParser{})
 	pfxlog.GlobalInit(logrus.InfoLevel, pfxlog.DefaultOptions().SetTrimPrefix("github.com/openziti/"))
 }
