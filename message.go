@@ -473,7 +473,7 @@ func readHelloV2(peer io.Reader) (*Message, error) {
 	}
 	headersLength := readUint32(messageSection[12:16])
 	bodyLength := readUint32(messageSection[16:20])
-	if headersLength > 4192 || bodyLength > 4192 {
+	if headersLength > 16384 || bodyLength > 4192 {
 		return nil, fmt.Errorf("hello message too big. header len: %v, body len: %v", headersLength, bodyLength)
 	}
 
