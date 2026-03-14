@@ -26,6 +26,7 @@ import (
 	"time"
 )
 
+// ReconnectingDialerConfig holds configuration for creating a reconnecting dialer.
 type ReconnectingDialerConfig struct {
 	Identity          *identity.TokenId
 	Endpoint          transport.Address
@@ -47,6 +48,7 @@ type reconnectingDialer struct {
 	disconnectHandler func()
 }
 
+// NewReconnectingDialer creates an UnderlayFactory that automatically reconnects on connection loss.
 func NewReconnectingDialer(config ReconnectingDialerConfig) UnderlayFactory {
 	return &reconnectingDialer{
 		identity:          config.Identity,

@@ -48,12 +48,14 @@ type classicListener struct {
 	underlayFactory func(messageStrategy MessageStrategy, peer transport.Conn, version uint32) classicUnderlay
 }
 
+// DefaultListenerConfig returns a ListenerConfig with sensible defaults.
 func DefaultListenerConfig() ListenerConfig {
 	return ListenerConfig{
 		ConnectOptions: DefaultConnectOptions(),
 	}
 }
 
+// ListenerConfig holds configuration for creating a classic listener.
 type ListenerConfig struct {
 	ConnectOptions
 	Headers            map[int32][]byte
@@ -116,6 +118,7 @@ func newClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 	}
 }
 
+// NewClassicListenerF creates a classic listener that calls f for each accepted underlay.
 func NewClassicListenerF(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig, f func(underlay Underlay)) (io.Closer, error) {
 	listener := newClassicListener(identity, endpoint, config)
 	listener.acceptF = f
@@ -125,6 +128,7 @@ func NewClassicListenerF(identity *identity.TokenId, endpoint transport.Address,
 	return listener, nil
 }
 
+// NewClassicListener creates a classic listener that produces underlays via Create.
 func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig) UnderlayListener {
 	listener := newClassicListener(identity, endpoint, config)
 	listener.created = make(chan Underlay)

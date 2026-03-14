@@ -1,3 +1,19 @@
+/*
+	Copyright NetFoundry Inc.
+
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
+
+	https://www.apache.org/licenses/LICENSE-2.0
+
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
+*/
+
 package channel
 
 import (
@@ -9,8 +25,10 @@ import (
 	"time"
 )
 
+// ErrClosed is returned when a read is attempted on a closed ReadAdapter.
 var ErrClosed = errors.New("channel closed")
 
+// ReadTimout is returned when a read operation exceeds its deadline. Implements net.Error.
 type ReadTimout struct{}
 
 func (r ReadTimout) Error() string {
@@ -25,6 +43,7 @@ func (r ReadTimout) Temporary() bool {
 	return true
 }
 
+// NewReadAdapter creates a ReadAdapter with the given label and internal buffer depth.
 func NewReadAdapter(label string, channelDepth int) *ReadAdapter {
 	return &ReadAdapter{
 		label:          label,
@@ -34,6 +53,7 @@ func NewReadAdapter(label string, channelDepth int) *ReadAdapter {
 	}
 }
 
+// ReadAdapter bridges push-based data delivery into an io.Reader interface with deadline support.
 type ReadAdapter struct {
 	label          string
 	ch             chan []byte
@@ -45,6 +65,7 @@ type ReadAdapter struct {
 	leftover       []byte
 }
 
+// PushData enqueues data to be read. Blocks until the data is accepted or the adapter is closed.
 func (self *ReadAdapter) PushData(data []byte) error {
 	select {
 	case self.ch <- data:
@@ -54,6 +75,7 @@ func (self *ReadAdapter) PushData(data []byte) error {
 	}
 }
 
+// SetReadDeadline sets the deadline for the next GetNext/Read call. A zero value clears the deadline.
 func (self *ReadAdapter) SetReadDeadline(deadline time.Time) error {
 	self.deadline.Store(deadline)
 	if self.readInProgress.Load() {
@@ -70,6 +92,7 @@ func (self *ReadAdapter) SetReadDeadline(deadline time.Time) error {
 	return nil
 }
 
+// GetNext blocks until data is available, the deadline expires, or the adapter is closed.
 func (self *ReadAdapter) GetNext() ([]byte, error) {
 	self.readInProgress.Store(true)
 	defer self.readInProgress.Store(false)

@@ -1,18 +1,35 @@
+/*
+	Copyright NetFoundry Inc.
+
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
+
+	https://www.apache.org/licenses/LICENSE-2.0
+
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
+*/
+
 package channel
 
 import (
 	"fmt"
+	"runtime"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
 	"github.com/openziti/foundation/v2/netz"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2/tcp"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
-	"runtime"
-	"strings"
-	"sync/atomic"
-	"testing"
-	"time"
 )
 
 var testAddress = "tcp:localhost:28433"
@@ -91,13 +108,13 @@ func TestInQueueTimeout(t *testing.T) {
 	req.NoError(ch.Send(blockingSendContext))
 	req.NoError(blockingSendContext.waitForBlocked(50 * time.Millisecond))
 
-	msg2 := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0))).WithPriority(High).(*priorityEnvelopeImpl)
+	msg2 := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0)))
 	blockingSendContext2 := NewBlockingContext(msg2)
 	req.NoError(ch.Send(blockingSendContext2))
 
 	// unblock the first sender in 10ms. The second blocker and the wait for send message will go through
-	// to the queue together. The blocking message has higher priority so it will go through first and
-	// block. The second message should then timeout
+	// to the queue together. The second blocking message will go through first and
+	// block. The third message should then timeout
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		blockingSendContext.Unblock(10 * time.Millisecond)
@@ -231,44 +248,6 @@ func TestNoWriteTimeout(t *testing.T) {
 	req.NoError(err)
 }
 
-func TestPriorityOrdering(t *testing.T) {
-	server := newTestServer()
-	server.start(t)
-	defer server.stop(t)
-
-	req := require.New(t)
-
-	options := DefaultOptions()
-	options.WriteTimeout = 100 * time.Millisecond
-
-	ch := dialServer(options, t, nil)
-	defer func() { _ = ch.Close() }()
-
-	msg := NewMessage(ContentTypePingType, []byte(fmt.Sprintf("hello-%v", 0)))
-	blockingSendContext := NewBlockingContext(msg)
-	req.NoError(ch.Send(blockingSendContext))
-	req.NoError(blockingSendContext.waitForBlocked(50 * time.Millisecond))
-
-	lowCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Low).(*priorityEnvelopeImpl))
-	req.NoError(ch.Send(lowCtx))
-
-	stdCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Standard).(*priorityEnvelopeImpl))
-	req.NoError(ch.Send(stdCtx))
-
-	highCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(High).(*priorityEnvelopeImpl))
-	req.NoError(ch.Send(highCtx))
-
-	highestCtx := NewNotifySendable(NewMessage(ContentTypePingType, nil).WithPriority(Highest).(*priorityEnvelopeImpl))
-	req.NoError(ch.Send(highestCtx))
-
-	blockingSendContext.Unblock(10 * time.Millisecond)
-
-	highestCtx.AssertNext(t, 10*time.Millisecond)
-	highCtx.AssertNext(t, 10*time.Millisecond)
-	stdCtx.AssertNext(t, 10*time.Millisecond)
-	lowCtx.AssertNext(t, 10*time.Millisecond)
-}
-
 func TestCleanup(t *testing.T) {
 	server := newTestServer()
 	server.start(t)
@@ -326,7 +305,7 @@ func TestCloseInBind(t *testing.T) {
 		return errors.New("test")
 	}
 
-	_, err = NewChannel("echo-test", underlayFactory, BindHandlerF(bindHandler), options)
+	_, err = NewSingleChannel("echo-test", underlayFactory, BindHandlerF(bindHandler), options)
 	req.EqualError(err, "test")
 	req.True(ch.IsClosed())
 	select {
@@ -345,7 +324,7 @@ func dialServer(options *Options, t *testing.T, bindHandler BindHandler) Channel
 	clientId := &identity.TokenId{Token: "echo-client"}
 	underlayFactory := NewClassicDialer(DialerConfig{Identity: clientId, Endpoint: addr})
 
-	ch, err := NewChannel("echo-test", underlayFactory, bindHandler, options)
+	ch, err := NewSingleChannel("echo-test", underlayFactory, bindHandler, options)
 	req.NoError(err)
 
 	return ch
@@ -414,7 +393,7 @@ func (self *testServer) accept() {
 	for {
 		counter++
 
-		ch, err := NewChannel(fmt.Sprintf("test-server-%v", counter), self.listener, BindHandlerF(bindHandler), self.options)
+		ch, err := NewSingleChannel(fmt.Sprintf("test-server-%v", counter), self.listener, BindHandlerF(bindHandler), self.options)
 		if err != nil {
 			logrus.WithError(err).Error("test listener error, exiting")
 			return
@@ -463,10 +442,6 @@ type BlockingSendable struct {
 
 func (self *BlockingSendable) SendListener() SendListener {
 	return self
-}
-
-func (self *BlockingSendable) Priority() Priority {
-	return High
 }
 
 func (self *BlockingSendable) NotifyBeforeWrite() {
@@ -519,7 +494,6 @@ func (self *NotifySendable) AssertNext(t *testing.T, timeout time.Duration) {
 	select {
 	case next := <-self.notify:
 		require.Equal(t, self, next)
-		require.Equal(t, self.Priority(), next.Priority())
 	case <-time.After(timeout):
 		require.FailNow(t, "timed out")
 	}

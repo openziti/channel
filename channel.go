@@ -19,11 +19,12 @@ package channel
 import (
 	"context"
 	"crypto/x509"
-	"github.com/openziti/transport/v2"
-	"github.com/pkg/errors"
 	"io"
 	"net"
 	"time"
+
+	"github.com/openziti/transport/v2"
+	"github.com/pkg/errors"
 )
 
 // Channel represents an asynchronous, message-passing framework, designed to sit on top of an underlay.
@@ -31,23 +32,42 @@ type Channel interface {
 	Identity
 	SetLogicalName(logicalName string)
 	Sender
+	UnderlayAcceptor
 	io.Closer
 	IsClosed() bool
 	Underlay() Underlay
 	Headers() map[int32][]byte
 	GetTimeSinceLastRead() time.Duration
 	GetUserData() interface{}
+	// GetSenders returns the Senders for this channel. Consumers that need access to
+	// priority-specific senders can type-assert the result to their concrete type:
+	//
+	//     mySenders := ch.GetSenders().(*MyCustomSenders)
+	//     mySenders.GetHighPrioritySender().Send(msg)
+	//
+	// This replaces v4's MultiChannel.GetUnderlayHandler() pattern.
+	GetSenders() Senders
 	GetUnderlays() []Underlay
 	GetUnderlayCountsByType() map[string]int
 }
 
-type MultiChannel interface {
-	Channel
-	UnderlayAcceptor
-	DialUnderlay(factory GroupedUnderlayFactory, underlayType string)
-	GetUnderlayHandler() UnderlayHandler
+// UnderlayConstraint specifies the desired and minimum number of underlays for a given type.
+type UnderlayConstraint struct {
+	Desired int
+	Min     int
 }
 
+// OneUnderlay returns a constraint requiring exactly one underlay.
+func OneUnderlay() UnderlayConstraint {
+	return UnderlayConstraint{Desired: 1, Min: 1}
+}
+
+// OptionalUnderlays returns a constraint with min 0 and the given desired count.
+func OptionalUnderlays(desired int) UnderlayConstraint {
+	return UnderlayConstraint{Desired: desired, Min: 0}
+}
+
+// Sender sends messages on a channel. It supports both blocking and non-blocking sends.
 type Sender interface {
 	// Send will send the given Sendable. If the Sender is busy, it will wait until either the Sender
 	// can process the Sendable, the channel is closed or the associated context.Context times out
@@ -72,9 +92,6 @@ type Sendable interface {
 	// Sequence returns the sequence number
 	Sequence() int32
 
-	// Priority returns the Priority of the Message
-	Priority() Priority
-
 	// Context returns the Context used for timeouts/cancelling message sends, etc
 	Context() context.Context
 
@@ -86,11 +103,8 @@ type Sendable interface {
 	ReplyReceiver() ReplyReceiver
 }
 
-// Envelope allows setting message priority and context. Message is an Envelope (as well as a Sendable)
+// Envelope allows setting message context and timeouts. Message is an Envelope (as well as a Sendable)
 type Envelope interface {
-	// WithPriority returns an Envelope with the given priority
-	WithPriority(p Priority) Envelope
-
 	// WithTimeout returns a TimeoutEnvelope with a context using the given timeout
 	WithTimeout(duration time.Duration) TimeoutEnvelope
 
@@ -123,7 +137,7 @@ type TimeoutEnvelope interface {
 
 // SendListener is notified at the various stages of a message send
 type SendListener interface {
-	// Notify Queued is called when the message has been queued for send
+	// NotifyQueued is called when the message has been queued for send
 	NotifyQueued()
 	// NotifyBeforeWrite is called before send is called
 	NotifyBeforeWrite()
@@ -138,6 +152,7 @@ type ReplyReceiver interface {
 	AcceptReply(*Message)
 }
 
+// Identity exposes the identifying information of a channel to callers and lower-level resources.
 type Identity interface {
 	// The Id used to represent the identity of this channel to lower-level resources.
 	//
@@ -175,14 +190,11 @@ type UnderlayFactory interface {
 	Create(timeout time.Duration) (Underlay, error)
 }
 
+// DialUnderlayFactory extends UnderlayFactory with the ability to pass custom headers during creation.
+// Used by DialPolicy to include connection metadata (type, connection ID, group secret) when dialing.
 type DialUnderlayFactory interface {
 	UnderlayFactory
 	CreateWithHeaders(timeout time.Duration, headers map[int32][]byte) (Underlay, error)
-}
-
-type GroupedUnderlayFactory interface {
-	CreateGroupedUnderlay(groupId string, groupedSecret []byte, underlayType string, timeout time.Duration) (Underlay, error)
-	DialFailed(channel MultiChannel, underlayType string, attempt int)
 }
 
 // Underlay abstracts a physical communications channel, typically sitting on top of 'transport'.
@@ -206,7 +218,10 @@ type classicUnderlay interface {
 	rxHello() (*Message, error)
 }
 
+// AnyContentType is a wildcard content type used to register a fallback receive handler.
 const AnyContentType = -1
+
+// HelloSequence is the sequence number used for hello/handshake messages.
 const HelloSequence = -1
 
 // TimeoutError is used to indicate a timeout happened
@@ -218,16 +233,19 @@ func (self TimeoutError) Unwrap() error {
 	return self.error
 }
 
+// IsTimeout returns true if the error is or wraps a TimeoutError.
 func IsTimeout(err error) bool {
 	return errors.As(err, &TimeoutError{})
 }
 
+// ClosedError indicates an operation was attempted on a closed channel.
 type ClosedError struct{}
 
 func (ClosedError) Error() string {
 	return "channel closed"
 }
 
+// ListenerClosedError is returned when an operation is attempted on a closed listener.
 var ListenerClosedError = listenerClosedError{}
 
 type listenerClosedError struct{}
@@ -241,10 +259,6 @@ type BaseSendable struct{}
 
 func (BaseSendable) Msg() *Message {
 	return nil
-}
-
-func (BaseSendable) Priority() Priority {
-	return Standard
 }
 
 func (BaseSendable) Context() context.Context {

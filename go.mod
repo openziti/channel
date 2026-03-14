@@ -1,4 +1,4 @@
-module github.com/openziti/channel/v4
+module github.com/openziti/channel/v5
 
 go 1.25.0
 

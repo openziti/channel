@@ -31,6 +31,7 @@ type existingConnListener struct {
 	headers  map[int32][]byte
 }
 
+// NewExistingConnListener creates an UnderlayFactory that accepts a hello handshake over an existing net.Conn.
 func NewExistingConnListener(identity *identity.TokenId, peer net.Conn, headers map[int32][]byte) UnderlayFactory {
 	return &existingConnListener{
 		identity: identity,
