@@ -65,47 +65,55 @@ func DefaultConnectOptions() ConnectOptions {
 	}
 }
 
-// LoadOptions parses channel Options from a configuration map.
+// LoadOptions parses channel Options from a configuration map, starting from DefaultOptions.
 func LoadOptions(data map[interface{}]interface{}) (*Options, error) {
 	options := DefaultOptions()
+	if err := options.Load(data); err != nil {
+		return nil, err
+	}
+	return options, nil
+}
 
+// Load applies configuration values from the given map onto the Options instance.
+// This allows callers to adjust defaults before loading configuration.
+func (o *Options) Load(data map[interface{}]interface{}) error {
 	if value, found := data["outQueueSize"]; found {
 		if floatValue, ok := value.(float64); ok {
-			options.OutQueueSize = int(floatValue)
+			o.OutQueueSize = int(floatValue)
 		}
 	}
 
 	if value, found := data["maxQueuedConnects"]; found {
 		if intVal, ok := value.(int); ok {
-			options.MaxQueuedConnects = intVal
+			o.MaxQueuedConnects = intVal
 		}
 	}
 
 	if value, found := data["maxOutstandingConnects"]; found {
 		if intVal, ok := value.(int); ok {
-			options.MaxOutstandingConnects = intVal
+			o.MaxOutstandingConnects = intVal
 		}
 	}
 
 	if value, found := data["connectTimeoutMs"]; found {
 		if intVal, ok := value.(int); ok {
-			options.ConnectTimeout = time.Duration(intVal) * time.Millisecond
+			o.ConnectTimeout = time.Duration(intVal) * time.Millisecond
 		}
 	}
 
 	if value, found := data["writeTimeout"]; found {
 		if strVal, ok := value.(string); ok {
 			if d, err := time.ParseDuration(strVal); err == nil {
-				options.WriteTimeout = d
+				o.WriteTimeout = d
 			} else {
-				return nil, errors.Wrapf(err, "invalid value for writeTimeout: %v", value)
+				return errors.Wrapf(err, "invalid value for writeTimeout: %v", value)
 			}
 		} else {
-			return nil, errors.Errorf("invalid (non-string) value for writeTimeout: %v", value)
+			return errors.Errorf("invalid (non-string) value for writeTimeout: %v", value)
 		}
 	}
 
-	return options, nil
+	return nil
 }
 
 func (o Options) String() string {
