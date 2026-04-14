@@ -168,11 +168,16 @@ func (dialer *reconnectingDialer) sendHello(impl *reconnectingImpl) error {
 	if !result.Success {
 		return errors.New(result.Message)
 	}
-	impl.connectionId = string(response.Headers[ConnectionIdHeader])
-
-	if id, ok := response.GetStringHeader(IdHeader); ok {
-		impl.id = &identity.TokenId{Token: id}
+	if impl.connectionId == "" {
+		if id, ok := response.GetStringHeader(IdHeader); ok {
+			impl.id = &identity.TokenId{Token: id}
+		}
+	} else {
+		if id, ok := response.GetStringHeader(IdHeader); ok && id != impl.id.Token {
+			log.Warnf("reconnected underlay has different id [%s] than expected [%s]", id, impl.id.Token)
+		}
 	}
+	impl.connectionId = string(response.Headers[ConnectionIdHeader])
 
 	impl.headers.Store(response.Headers)
 
