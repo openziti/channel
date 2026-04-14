@@ -17,10 +17,11 @@
 package channel
 
 import (
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"sync/atomic"
 	"time"
+
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 // Heartbeat timing defaults.
@@ -83,7 +84,7 @@ func LoadHeartbeatOptions(data map[interface{}]interface{}) (*HeartbeatOptions, 
 	if value, err := options.GetDuration("closeUnresponsiveTimeout"); err != nil {
 		return nil, err
 	} else if value != nil {
-		options.CheckInterval = *value
+		options.CloseUnresponsiveTimeout = *value
 	}
 
 	return options, nil

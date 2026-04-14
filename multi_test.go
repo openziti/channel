@@ -195,8 +195,8 @@ func newPriorityChannelBase() *priorityChannelBase {
 
 	closeNotify := ctx.GetCloseNotify()
 
-	msgSourceProvider := NewSimpleMessageSourceProvider(MakeSource3(closeNotify, defaultQ.C, priorityQ.C, retryQ.C))
-	msgSourceProvider.AddSource("priority", MakeSource2(closeNotify, priorityQ.C, retryQ.C))
+	msgSourceProvider := NewSimpleMessageSourceProvider(MakeThreeQueueMessageSource(closeNotify, defaultQ.C, priorityQ.C, retryQ.C))
+	msgSourceProvider.AddSource("priority", MakeTwoQueueMessageSource(closeNotify, priorityQ.C, retryQ.C))
 
 	return &priorityChannelBase{
 		SenderContext:         ctx,

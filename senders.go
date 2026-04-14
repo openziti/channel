@@ -39,7 +39,7 @@ type Senders interface {
 
 // MessageQueue pairs a Sender with its backing channel. Use this to create
 // priority-based message routing: create one queue per priority level, then
-// wire them to message sources using MakeSource1/2/3.
+// wire them to message sources using MakeSingleQueueMessageSource/2/3.
 type MessageQueue struct {
 	C      chan Sendable
 	Sender Sender

@@ -157,10 +157,8 @@ func (self *waiterMap) reapExpired(now int64) {
 }
 
 func (self *waiterMap) clear() {
-	self.m.Range(func(k, v interface{}) bool {
-		self.m.Delete(k)
-		return true
-	})
+	atomic.StoreInt32(&self.size, 0)
+	self.m.Clear()
 }
 
 type channelImpl struct {
@@ -876,4 +874,3 @@ func (self *CloseNotifier) NotifyClosed() {
 func (self *CloseNotifier) GetCloseNotify() <-chan struct{} {
 	return self.c
 }
-

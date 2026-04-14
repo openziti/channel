@@ -27,8 +27,8 @@ type MessageSourceProvider interface {
 	GetMessageSource(underlayType string) MessageSourceF
 }
 
-// MakeSource1 returns a MessageSourceF that reads from one queue.
-func MakeSource1(closeNotify <-chan struct{}, q1 <-chan Sendable) MessageSourceF {
+// MakeSingleQueueMessageSource returns a MessageSourceF that reads from one queue.
+func MakeSingleQueueMessageSource(closeNotify <-chan struct{}, q1 <-chan Sendable) MessageSourceF {
 	return func(notifier *CloseNotifier) (Sendable, error) {
 		select {
 		case msg := <-q1:
@@ -41,8 +41,8 @@ func MakeSource1(closeNotify <-chan struct{}, q1 <-chan Sendable) MessageSourceF
 	}
 }
 
-// MakeSource2 returns a MessageSourceF that reads from two queues with equal priority.
-func MakeSource2(closeNotify <-chan struct{}, q1, q2 <-chan Sendable) MessageSourceF {
+// MakeTwoQueueMessageSource returns a MessageSourceF that reads from two queues with equal priority.
+func MakeTwoQueueMessageSource(closeNotify <-chan struct{}, q1, q2 <-chan Sendable) MessageSourceF {
 	return func(notifier *CloseNotifier) (Sendable, error) {
 		select {
 		case msg := <-q1:
@@ -57,8 +57,8 @@ func MakeSource2(closeNotify <-chan struct{}, q1, q2 <-chan Sendable) MessageSou
 	}
 }
 
-// MakeSource3 returns a MessageSourceF that reads from three queues with equal priority.
-func MakeSource3(closeNotify <-chan struct{}, q1, q2, q3 <-chan Sendable) MessageSourceF {
+// MakeThreeQueueMessageSource returns a MessageSourceF that reads from three queues with equal priority.
+func MakeThreeQueueMessageSource(closeNotify <-chan struct{}, q1, q2, q3 <-chan Sendable) MessageSourceF {
 	return func(notifier *CloseNotifier) (Sendable, error) {
 		select {
 		case msg := <-q1:
