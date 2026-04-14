@@ -182,7 +182,7 @@ type channelImpl struct {
 	errorHandlers     []ErrorHandler
 	closeHandlers     []CloseHandler
 	userData          interface{}
-	replyCounter      uint32
+	replyCounter      atomic.Uint32
 	groupSecret       []byte
 
 	senders               Senders
@@ -501,8 +501,7 @@ func (self *channelImpl) rx(m *Message) {
 
 	handled := false
 	if m.IsReply() {
-		self.replyCounter++
-		if self.replyCounter%100 == 0 && self.waiters.Size() > 1000 {
+		if self.replyCounter.Add(1)%100 == 0 && self.waiters.Size() > 1000 {
 			self.waiters.reapExpired(now)
 		}
 		replyFor := m.ReplyFor()
@@ -594,12 +593,14 @@ func (self *channelImpl) closeUnderlay(underlay Underlay, notifier *CloseNotifie
 	notifier.NotifyClosed()
 	self.underlays.Remove(self, underlay)
 
+	self.lock.Lock()
 	if *self.fallbackUnderlay.Load() == underlay {
 		if underlays := self.underlays.GetAll(); len(underlays) > 0 {
 			lastUnderlay := underlays[len(underlays)-1]
 			self.fallbackUnderlay.Store(&lastUnderlay)
 		}
 	}
+	self.lock.Unlock()
 }
 
 func (self *channelImpl) GetTimeSinceLastRead() time.Duration {
@@ -682,6 +683,17 @@ func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay) {
 		WithField("underlays", ch.GetUnderlayCountsByType()).
 		WithField("underlayType", GetUnderlayType(underlay)).
 		Info("underlay removed")
+
+	if len(self.constraints) == 0 && self.dialPolicy == nil {
+		// No constraints or dial policy means this is a simple channel that cannot
+		// recover from underlay loss. If no underlays remain, close the channel.
+		if len(self.underlays.GetAll()) == 0 {
+			if err := self.Close(); err != nil {
+				pfxlog.Logger().WithError(err).Error("error closing channel after last underlay removed")
+			}
+		}
+		return
+	}
 
 	go self.applyConstraints()
 }
