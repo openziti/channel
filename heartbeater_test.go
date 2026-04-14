@@ -1,12 +1,29 @@
+/*
+	Copyright NetFoundry Inc.
+
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
+
+	https://www.apache.org/licenses/LICENSE-2.0
+
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
+*/
+
 package channel
 
 import (
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/stretchr/testify/require"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/michaelquigley/pfxlog"
+	"github.com/stretchr/testify/require"
 )
 
 // A simple test to check for failure of alignment on atomic operations for 64 bit variables in a struct
@@ -186,14 +203,14 @@ func TestBusyHeartbeat(t *testing.T) {
 	default:
 	}
 
-	fmt.Printf("count:  %v\nremote: %v\nchecks: %v\n", count, remoteCount, hb.checkCount)
+	fmt.Printf("count:  %v\nremote: %v\nchecks: %v\n", count, remoteCount, hb.checkCount.Load())
 
-	req.True(hb.respRx >= 8, "value: %v", hb.respRx)
-	req.True(hb.respRx < 12, "value: %v", hb.respRx)
-	req.True(hb.remoteCount >= 8, "value: %v", hb.remoteCount)
-	req.True(hb.remoteCount < 12, "value: %v", hb.remoteCount)
-	req.True(hb.checkCount > 80, "value: %v", hb.checkCount)
-	req.True(hb.checkCount < 120, "value: %v", hb.checkCount)
+	req.True(hb.respRx.Load() >= 8, "value: %v", hb.respRx.Load())
+	req.True(hb.respRx.Load() < 12, "value: %v", hb.respRx.Load())
+	req.True(hb.remoteCount.Load() >= 8, "value: %v", hb.remoteCount.Load())
+	req.True(hb.remoteCount.Load() < 12, "value: %v", hb.remoteCount.Load())
+	req.True(hb.checkCount.Load() > 80, "value: %v", hb.checkCount.Load())
+	req.True(hb.checkCount.Load() < 120, "value: %v", hb.checkCount.Load())
 }
 
 func TestQuietHeartbeat(t *testing.T) {
@@ -276,23 +293,23 @@ func TestQuietHeartbeat(t *testing.T) {
 
 	fmt.Printf("count:  %v\nremote: %v\n", count, remoteCount)
 
-	req.True(hb.respRx > 8)
-	req.True(hb.respRx < 12)
-	req.True(hb.remoteCount > 8)
-	req.True(hb.remoteCount < 12)
+	req.True(hb.respRx.Load() > 8)
+	req.True(hb.respRx.Load() < 12)
+	req.True(hb.remoteCount.Load() > 8)
+	req.True(hb.remoteCount.Load() < 12)
 }
 
 type heartbeatTracker struct {
 	id          string
-	hbTx        int
-	respRx      int
-	remoteCount int
-	checkCount  int
+	hbTx        atomic.Int32
+	respRx      atomic.Int32
+	remoteCount atomic.Int32
+	checkCount  atomic.Int32
 }
 
 func (self *heartbeatTracker) HeartbeatTx(ts int64) {
-	self.hbTx++
-	fmt.Printf("%v: h-> @%v, hbTx: %v\n", self.id, ts, self.hbTx)
+	self.hbTx.Add(1)
+	fmt.Printf("%v: h-> @%v, hbTx: %v\n", self.id, ts, self.hbTx.Load())
 }
 
 func (self *heartbeatTracker) HeartbeatRx(ts int64) {
@@ -300,17 +317,17 @@ func (self *heartbeatTracker) HeartbeatRx(ts int64) {
 }
 
 func (self *heartbeatTracker) HeartbeatRespTx(ts int64) {
-	self.remoteCount++
-	fmt.Printf("%v: r-> @%v, rc: %v\n", self.id, ts, self.remoteCount)
+	self.remoteCount.Add(1)
+	fmt.Printf("%v: r-> @%v, rc: %v\n", self.id, ts, self.remoteCount.Load())
 }
 
 func (self *heartbeatTracker) HeartbeatRespRx(ts int64) {
-	self.respRx++
-	fmt.Printf("%v: <-r @%v, respRx: %v\n", self.id, ts, self.respRx)
+	self.respRx.Add(1)
+	fmt.Printf("%v: <-r @%v, respRx: %v\n", self.id, ts, self.respRx.Load())
 }
 
 func (self *heartbeatTracker) CheckHeartBeat() {
-	self.checkCount++
+	self.checkCount.Add(1)
 }
 
 func (self *heartbeatTracker) HeartbeatReceived(*Message, Channel) {

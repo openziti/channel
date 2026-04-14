@@ -25,6 +25,7 @@ type wsListener struct {
 	Impl *wsImpl
 }
 
+// NewWSListener creates a WebSocket listener from an existing transport connection.
 func NewWSListener(peer transport.Conn) *wsListener {
 	impl := newWSImpl(peer, 2)
 

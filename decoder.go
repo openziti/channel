@@ -20,8 +20,10 @@ import (
 	"github.com/michaelquigley/pfxlog"
 )
 
+// Decoder decodes built-in channel message types (hello, ping, result, latency, heartbeat) for tracing.
 type Decoder struct{}
 
+// DECODER is the decoder name used in trace output for built-in channel messages.
 const DECODER = "channel"
 
 func (d Decoder) Decode(msg *Message) ([]byte, bool) {

@@ -19,13 +19,11 @@ package channel
 import (
 	"errors"
 	"fmt"
-	"io"
 	"math/rand"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/goroutines"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
@@ -58,9 +56,9 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 		}
 	}
 
-	bindHandlerF := func(priorityCh PriorityChannel, closeCallback func()) BindHandler {
-		bindHandler := BindHandlerF(func(binding Binding) error {
-			binding.AddReceiveHandlerF(100, func(m *Message, ch Channel) {
+	bindHandlerF := func(closeCallback func()) TypedBindHandler[PriorityChannel] {
+		return TypedBindHandlerF[PriorityChannel](func(binding TypedBinding[PriorityChannel]) error {
+			binding.AddTypedReceiveHandlerF(100, func(m *Message, ch Channel, senders PriorityChannel) {
 				// fmt.Printf("default msg received: %v\n", m.Body[0])
 				if m.IsReply() {
 					msgReplyCount.Add(1)
@@ -68,12 +66,12 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 					msgCount.Add(1)
 					replyMsg := NewMessage(110, m.Body)
 					replyMsg.ReplyTo(m)
-					sendErr := replyMsg.WithTimeout(time.Second).SendAndWaitForWire(priorityCh.GetPrioritySender())
+					sendErr := replyMsg.WithTimeout(time.Second).SendAndWaitForWire(senders.GetPrioritySender())
 					handleAsyncErr(sendErr)
 				}
 			})
 
-			binding.AddReceiveHandlerF(110, func(m *Message, ch Channel) {
+			binding.AddTypedReceiveHandlerF(110, func(m *Message, ch Channel, senders PriorityChannel) {
 				// fmt.Printf("priority msg received: %v\n", m.Body[0])
 				if m.IsReply() {
 					priorityReplyCount.Add(1)
@@ -81,7 +79,7 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 					priorityCount.Add(1)
 					replyMsg := NewMessage(100, m.Body)
 					replyMsg.ReplyTo(m)
-					sendErr := replyMsg.WithTimeout(time.Second).SendAndWaitForWire(priorityCh.GetDefaultSender())
+					sendErr := replyMsg.WithTimeout(time.Second).SendAndWaitForWire(senders.GetDefaultSender())
 					handleAsyncErr(sendErr)
 				}
 			})
@@ -94,26 +92,28 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 
 			return nil
 		})
-		return bindHandler
 	}
 
-	newMultiChannel := func(logicalName string, priorityChannel PriorityChannel, underlay Underlay, closeCallback func()) (MultiChannel, error) {
-		multiConfig := MultiChannelConfig{
-			LogicalName:     logicalName,
-			Options:         DefaultOptions(),
-			UnderlayHandler: priorityChannel,
-			BindHandler:     bindHandlerF(priorityChannel, closeCallback),
-			Underlay:        underlay,
+	newChannel := func(logicalName string, priorityChannel PriorityChannel, underlay Underlay, closeCallback func()) (Channel, error) {
+		multiConfig := Config{
+			LogicalName:           logicalName,
+			Options:               DefaultOptions(),
+			Binder:                MakeTypedBinder[PriorityChannel](priorityChannel, bindHandlerF(closeCallback)),
+			Underlay:              underlay,
+			Senders:               priorityChannel,
+			MessageSourceProvider: priorityChannel.GetMessageSourceProvider(),
+			DialPolicy:            priorityChannel.GetDialPolicy(),
+			Constraints:           priorityChannel.GetConstraints(),
 		}
-		return NewMultiChannel(&multiConfig)
+		return NewChannel(&multiConfig)
 	}
 
-	multiListener := NewMultiListener(func(underlay Underlay, closeCallback func()) (MultiChannel, error) {
+	multiListener := NewMultiListener(func(underlay Underlay, closeCallback func()) (Channel, error) {
 		wrapper := &TypeLoggingUnderlay{
 			wrapped: underlay,
 		}
-		underlayHandler := NewListenerPriorityChannel()
-		return newMultiChannel("listener", underlayHandler, wrapper, closeCallback)
+		handler := NewListenerPriorityChannel()
+		return newChannel("listener", handler, wrapper, closeCallback)
 	}, func(underlay Underlay) error {
 		return errors.New("this implementation only accepts grouped channel")
 	})
@@ -139,7 +139,7 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 	dialer := NewClassicDialer(DialerConfig{
 		Identity: &identity.TokenId{Token: "test-client"},
 		Endpoint: dialAddr,
-	}).(*classicDialer)
+	})
 
 	headers := Headers{}
 	headers.PutStringHeader(TypeHeader, "default")
@@ -149,8 +149,8 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 	underlay, err := dialer.CreateWithHeaders(time.Second, headers)
 	req.NoError(err)
 
-	priorityCh := NewDialPriorityChannel(dialer, underlay)
-	ch, err := newMultiChannel("dialer", priorityCh, underlay, nil)
+	priorityCh := NewDialPriorityChannel(dialer)
+	ch, err := newChannel("dialer", priorityCh, underlay, nil)
 	req.NoError(err)
 	defer func() { _ = ch.Close() }()
 
@@ -187,102 +187,58 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 }
 
 func newPriorityChannelBase() *priorityChannelBase {
-	senderContext := NewSenderContext()
+	ctx := NewSenderContext()
 
-	defaultMsgChan := make(chan Sendable, 4)
-	priorityMsgChan := make(chan Sendable, 4)
-	retryMsgChan := make(chan Sendable, 4)
+	defaultQ := NewMessageQueue(ctx, 4)
+	priorityQ := NewMessageQueue(ctx, 4)
+	retryQ := NewMessageQueue(ctx, 4)
 
-	result := &priorityChannelBase{
-		SenderContext:   senderContext,
-		prioritySender:  NewSingleChSender(senderContext, priorityMsgChan),
-		defaultSender:   NewSingleChSender(senderContext, defaultMsgChan),
-		priorityMsgChan: priorityMsgChan,
-		defaultMsgChan:  defaultMsgChan,
-		retryMsgChan:    retryMsgChan,
+	closeNotify := ctx.GetCloseNotify()
+
+	msgSourceProvider := NewSimpleMessageSourceProvider(MakeThreeQueueMessageSource(closeNotify, defaultQ.C, priorityQ.C, retryQ.C))
+	msgSourceProvider.AddSource("priority", MakeTwoQueueMessageSource(closeNotify, priorityQ.C, retryQ.C))
+
+	return &priorityChannelBase{
+		SenderContext:         ctx,
+		defaultQueue:          defaultQ,
+		priorityQueue:         priorityQ,
+		retryQueue:            retryQ,
+		handleTxFailed:        RetryToQueues(retryQ, defaultQ),
+		messageSourceProvider: msgSourceProvider,
 	}
-	return result
 }
 
+// priorityChannelBase implements Senders and provides message source routing.
 type priorityChannelBase struct {
 	SenderContext
-	prioritySender Sender
-	defaultSender  Sender
-
-	priorityMsgChan chan Sendable
-	defaultMsgChan  chan Sendable
-	retryMsgChan    chan Sendable
+	defaultQueue          *MessageQueue
+	priorityQueue         *MessageQueue
+	retryQueue            *MessageQueue
+	handleTxFailed        func(string, Sendable) bool
+	messageSourceProvider *SimpleMessageSourceProvider
 }
 
-func (self *priorityChannelBase) ChannelCreated(MultiChannel) {}
+func (self *priorityChannelBase) GetMessageSourceProvider() MessageSourceProvider {
+	return self.messageSourceProvider
+}
 
 func (self *priorityChannelBase) GetDefaultSender() Sender {
-	return self.defaultSender
+	return self.defaultQueue.Sender
 }
 
 func (self *priorityChannelBase) GetPrioritySender() Sender {
-	return self.prioritySender
+	return self.priorityQueue.Sender
 }
 
-func (self *priorityChannelBase) GetNextMsgDefault(notifier *CloseNotifier) (Sendable, error) {
-	select {
-	case msg := <-self.defaultMsgChan:
-		return msg, nil
-	case msg := <-self.priorityMsgChan:
-		return msg, nil
-	case msg := <-self.retryMsgChan:
-		return msg, nil
-	case <-self.GetCloseNotify():
-		return nil, io.EOF
-	case <-notifier.GetCloseNotify():
-		return nil, io.EOF
-	}
+func (self *priorityChannelBase) HandleTxFailed(underlayType string, sendable Sendable) bool {
+	return self.handleTxFailed(underlayType, sendable)
 }
 
-func (self *priorityChannelBase) GetNextPriorityMsg(notifier *CloseNotifier) (Sendable, error) {
-	select {
-	case msg := <-self.priorityMsgChan:
-		return msg, nil
-	case msg := <-self.retryMsgChan:
-		return msg, nil
-	case <-self.GetCloseNotify():
-		return nil, io.EOF
-	case <-notifier.GetCloseNotify():
-		return nil, io.EOF
-	}
-}
-
-func (self *priorityChannelBase) GetMessageSource(underlay Underlay) MessageSourceF {
-	if GetUnderlayType(underlay) == "priority" {
-		return self.GetNextPriorityMsg
-	}
-	return self.GetNextMsgDefault
-}
-
-func (self *priorityChannelBase) HandleTxFailed(_ Underlay, sendable Sendable) bool {
-	select {
-	case self.retryMsgChan <- sendable:
-		return true
-	case self.defaultMsgChan <- sendable:
-		return true
-	default:
-		return false
-	}
-}
-
-func (self *priorityChannelBase) HandleUnderlayAccepted(ch MultiChannel, underlay Underlay) {
-	pfxlog.Logger().
-		WithField("id", ch.Label()).
-		WithField("underlays", ch.GetUnderlayCountsByType()).
-		WithField("underlayType", GetUnderlayType(underlay)).
-		Info("underlay added")
-}
-
-func (self *priorityChannelBase) CloseRandom(ch MultiChannel) {
-	mc := ch.(*multiChannelImpl)
+func (self *priorityChannelBase) CloseRandom(ch Channel) {
+	mc := ch.(*channelImpl)
 	mc.lock.Lock()
 	defer mc.lock.Unlock()
-	underlays := mc.underlays.Value()
+	underlays := mc.underlays.GetAll()
 	if len(underlays) > 0 {
 		idx := rand.Intn(len(underlays))
 		underlay := underlays[idx]
@@ -290,89 +246,65 @@ func (self *priorityChannelBase) CloseRandom(ch MultiChannel) {
 	}
 }
 
-func NewDialPriorityChannel(dialer *classicDialer, _ Underlay) PriorityChannel {
-	result := &dialPriorityChannel{
-		priorityChannelBase: *newPriorityChannelBase(),
-		dialer:              dialer,
-	}
-
-	result.constraints.AddConstraint("default", 2, 1)
-	result.constraints.AddConstraint("priority", 1, 0)
-
-	return result
+// PriorityChannel is the test interface for priority-aware multi-underlay channels.
+type PriorityChannel interface {
+	Senders
+	GetPrioritySender() Sender
+	GetMessageSourceProvider() MessageSourceProvider
+	GetDialPolicy() DialPolicy
+	GetConstraints() map[string]UnderlayConstraint
+	CloseRandom(ch Channel)
 }
 
-type PriorityChannel interface {
-	UnderlayHandler
-	GetPrioritySender() Sender
-	CloseRandom(ch MultiChannel)
+func NewDialPriorityChannel(dialer DialUnderlayFactory) PriorityChannel {
+	base := newPriorityChannelBase()
+
+	backoffConfig := DefaultBackoffConfig
+	backoffConfig.MinStableDuration = 0 // test closes underlays randomly, don't penalize short-lived connections
+
+	return &dialPriorityChannel{
+		priorityChannelBase: base,
+		dialPolicy:          NewBackoffDialPolicyWithConfig(dialer, backoffConfig),
+		constraints: map[string]UnderlayConstraint{
+			"default":  {Desired: 2, Min: 1},
+			"priority": {Desired: 1, Min: 0},
+		},
+	}
 }
 
 type dialPriorityChannel struct {
-	priorityChannelBase
-	dialer      *classicDialer
-	constraints UnderlayConstraints
+	*priorityChannelBase
+	dialPolicy  DialPolicy
+	constraints map[string]UnderlayConstraint
 }
 
-func (self *dialPriorityChannel) Start(channel MultiChannel) {
-	self.constraints.Apply(channel, self)
+func (self *dialPriorityChannel) GetDialPolicy() DialPolicy {
+	return self.dialPolicy
 }
 
-func (self *dialPriorityChannel) HandleUnderlayClose(ch MultiChannel, underlay Underlay) {
-	pfxlog.Logger().
-		WithField("id", ch.Label()).
-		WithField("underlays", ch.GetUnderlayCountsByType()).
-		WithField("underlayType", GetUnderlayType(underlay)).
-		WithField("underlayAddr", fmt.Sprintf("%p", underlay)).
-		Info("underlay closed")
-	self.constraints.Apply(ch, self)
-}
-
-func (self *dialPriorityChannel) DialFailed(_ MultiChannel, _ string, attempt int) {
-	delay := 2 * time.Duration(attempt) * time.Second
-	if delay > time.Minute {
-		delay = time.Minute
-	}
-	time.Sleep(delay)
-}
-
-func (self *dialPriorityChannel) CreateGroupedUnderlay(groupId string, groupSecret []byte, underlayType string, timeout time.Duration) (Underlay, error) {
-	underlay, err := self.dialer.CreateWithHeaders(timeout, map[int32][]byte{
-		TypeHeader:         []byte(underlayType),
-		ConnectionIdHeader: []byte(groupId),
-		GroupSecretHeader:  groupSecret,
-		IsGroupedHeader:    {1},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &TypeLoggingUnderlay{
-		wrapped: underlay,
-	}, nil
+func (self *dialPriorityChannel) GetConstraints() map[string]UnderlayConstraint {
+	return self.constraints
 }
 
 func NewListenerPriorityChannel() PriorityChannel {
-	result := &listenerPriorityChannel{
-		priorityChannelBase: *newPriorityChannelBase(),
+	return &listenerPriorityChannel{
+		priorityChannelBase: newPriorityChannelBase(),
+		constraints: map[string]UnderlayConstraint{
+			"default":  {Desired: 2, Min: 1},
+			"priority": {Desired: 1, Min: 0},
+		},
 	}
-
-	result.constraints.AddConstraint("default", 2, 1)
-	result.constraints.AddConstraint("priority", 1, 0)
-
-	return result
 }
 
 type listenerPriorityChannel struct {
-	priorityChannelBase
-	constraints UnderlayConstraints
+	*priorityChannelBase
+	constraints map[string]UnderlayConstraint
 }
 
-func (self *listenerPriorityChannel) Start(MultiChannel) {
+func (self *listenerPriorityChannel) GetDialPolicy() DialPolicy {
+	return nil
 }
 
-func (self *listenerPriorityChannel) HandleUnderlayClose(channel MultiChannel, underlay Underlay) {
-	pfxlog.Logger().WithField("underlays", channel.GetUnderlayCountsByType()).
-		WithField("underlayType", GetUnderlayType(underlay)).Info("underlay closed")
-	self.constraints.CheckStateValid(channel, true)
+func (self *listenerPriorityChannel) GetConstraints() map[string]UnderlayConstraint {
+	return self.constraints
 }
