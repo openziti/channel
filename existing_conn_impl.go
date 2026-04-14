@@ -20,10 +20,12 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/openziti/identity"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/openziti/identity"
 )
 
 type existingConnImpl struct {
@@ -32,7 +34,7 @@ type existingConnImpl struct {
 	connectionId string
 	headers      map[int32][]byte
 	closeLock    sync.Mutex
-	closed       bool
+	closed       atomic.Bool
 	readF        readFunction
 	marshalF     marshalFunction
 }
@@ -61,14 +63,14 @@ func (impl *existingConnImpl) rxHello() (*Message, error) {
 }
 
 func (impl *existingConnImpl) Rx() (*Message, error) {
-	if impl.closed {
+	if impl.closed.Load() {
 		return nil, errors.New("underlay closed")
 	}
 	return impl.readF(impl.peer)
 }
 
 func (impl *existingConnImpl) Tx(m *Message) error {
-	if impl.closed {
+	if impl.closed.Load() {
 		return errors.New("underlay closed")
 	}
 
@@ -113,15 +115,14 @@ func (impl *existingConnImpl) Close() error {
 	impl.closeLock.Lock()
 	defer impl.closeLock.Unlock()
 
-	if !impl.closed {
-		impl.closed = true
+	if impl.closed.CompareAndSwap(false, true) {
 		return impl.peer.Close()
 	}
 	return nil
 }
 
 func (impl *existingConnImpl) IsClosed() bool {
-	return impl.closed
+	return impl.closed.Load()
 }
 
 func newExistingImpl(peer net.Conn, version uint32) *existingConnImpl {
