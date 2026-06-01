@@ -55,7 +55,7 @@ func NextConnectionId() (string, error) {
 type Config struct {
 	LogicalName string
 	Options     *Options
-	Binder      func(ch *channelImpl) error
+	Binder      Binder
 	Underlay    Underlay
 
 	InjectUnderlayTypeIntoMessages bool
@@ -246,18 +246,16 @@ func NewChannel(config *Config) (Channel, error) {
 		impl.underlays.AddListener(l)
 	}
 
-	if config.Binder != nil {
-		if err := config.Binder(impl); err != nil {
-			if closeErr := impl.Close(); closeErr != nil {
-				pfxlog.ContextLogger(impl.Label()).WithError(closeErr).Warn("error closing channel after bind failure")
-			}
-			if closeErr := config.Underlay.Close(); closeErr != nil {
-				if !errors.Is(closeErr, net.ErrClosed) {
-					pfxlog.ContextLogger(impl.Label()).WithError(err).Warn("error closing underlay")
-				}
-			}
-			return nil, err
+	if err := config.Binder.bind(impl); err != nil {
+		if closeErr := impl.Close(); closeErr != nil {
+			pfxlog.ContextLogger(impl.Label()).WithError(closeErr).Warn("error closing channel after bind failure")
 		}
+		if closeErr := config.Underlay.Close(); closeErr != nil {
+			if !errors.Is(closeErr, net.ErrClosed) {
+				pfxlog.ContextLogger(impl.Label()).WithError(closeErr).Warn("error closing underlay")
+			}
+		}
+		return nil, err
 	}
 
 	// Add and start the first underlay (this triggers UnderlayAdded)
