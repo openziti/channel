@@ -209,6 +209,9 @@ type Underlay interface {
 	SetWriteDeadline(time time.Time) error
 	GetLocalAddr() net.Addr
 	GetRemoteAddr() net.Addr
+	// CreatedAt returns the time at which the underlay was created. It is used to judge
+	// connection stability, e.g. for flap detection when an underlay is closed.
+	CreatedAt() time.Time
 }
 
 type classicUnderlay interface {

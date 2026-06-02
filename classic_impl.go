@@ -19,11 +19,12 @@ package channel
 import (
 	"crypto/x509"
 	"fmt"
-	"github.com/openziti/transport/v2"
-	"github.com/pkg/errors"
 	"net"
 	"sync/atomic"
 	"time"
+
+	"github.com/openziti/transport/v2"
+	"github.com/pkg/errors"
 )
 
 type classicImpl struct {
@@ -34,6 +35,11 @@ type classicImpl struct {
 	closed       atomic.Bool
 	readF        readFunction
 	marshalF     marshalFunction
+	createdAt    time.Time
+}
+
+func (impl *classicImpl) CreatedAt() time.Time {
+	return impl.createdAt
 }
 
 func (impl *classicImpl) GetLocalAddr() net.Addr {
@@ -146,8 +152,9 @@ func newClassicImpl(messageStrategy MessageStrategy, peer transport.Conn, versio
 	}
 
 	return &classicImpl{
-		peer:     peer,
-		readF:    readF,
-		marshalF: marshalF,
+		peer:      peer,
+		readF:     readF,
+		marshalF:  marshalF,
+		createdAt: time.Now(),
 	}
 }

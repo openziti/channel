@@ -20,13 +20,14 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v5"
-	"github.com/openziti/identity"
 	"io"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/michaelquigley/pfxlog"
+	"github.com/openziti/channel/v5"
+	"github.com/openziti/identity"
 )
 
 type addr string
@@ -47,6 +48,11 @@ type memoryImpl struct {
 	headers      map[int32][]byte
 	closeLock    sync.Mutex
 	closed       bool
+	createdAt    time.Time
+}
+
+func (self *memoryImpl) CreatedAt() time.Time {
+	return self.createdAt
 }
 
 func (self *memoryImpl) GetLocalAddr() net.Addr {
@@ -134,8 +140,9 @@ func (self *memoryImpl) IsClosed() bool {
 
 func newMemoryImpl(tx, rx chan *channel.Message) *memoryImpl {
 	return &memoryImpl{
-		tx: tx,
-		rx: rx,
+		tx:        tx,
+		rx:        rx,
+		createdAt: time.Now(),
 	}
 }
 

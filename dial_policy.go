@@ -31,8 +31,13 @@ import (
 // initial connection or a reconnect after all underlays were lost. A first connection must
 // set the IsFirstGroupConnection header so the remote MultiListener creates a new channel
 // rather than rejecting the underlay; subsequent underlays attach to the existing group.
+//
+// UnderlayClosed is invoked by the channel whenever an underlay is removed, with how long
+// the underlay lived. This lets the policy judge connection stability directly, e.g. for
+// flap detection, rather than inferring it from dial timing.
 type DialPolicy interface {
 	Dial(underlayType string, connectionId string, groupSecret []byte, isFirst bool, connectTimeout time.Duration, cancel <-chan struct{}) (Underlay, error)
+	UnderlayClosed(underlayType string, lifetime time.Duration)
 }
 
 // BackoffConfig controls exponential backoff behavior.
@@ -41,9 +46,9 @@ type BackoffConfig struct {
 	BaseDelay time.Duration
 	// MaxDelay is the maximum delay between attempts (default: 60s).
 	MaxDelay time.Duration
-	// MinStableDuration is how long a connection must live to be considered stable (default: 5s).
-	// If a new dial is requested before this duration has elapsed since the last success,
-	// the connection is treated as short-lived and backoff is applied.
+	// MinStableDuration is how long a connection must live to be considered stable (default: 30s).
+	// An underlay that closes before living this long is treated as short-lived and counts as
+	// a failure for backoff purposes.
 	MinStableDuration time.Duration
 	// MinDialInterval is the minimum time between dial attempts (default: 0, no limit).
 	// If a dial is requested before this interval has elapsed since the last dial,
@@ -55,17 +60,22 @@ type BackoffConfig struct {
 var DefaultBackoffConfig = BackoffConfig{
 	BaseDelay:         2 * time.Second,
 	MaxDelay:          time.Minute,
-	MinStableDuration: 5 * time.Second,
+	MinStableDuration: 30 * time.Second,
 }
 
 // BackoffDialPolicy wraps a DialUnderlayFactory with exponential backoff retry logic.
-// It tracks consecutive failures and detects short-lived connections.
+// Failed dials and short-lived connections (reported via UnderlayClosed) count as failures;
+// a connection that closes after a stable lifetime, or one that has demonstrably outlived
+// MinStableDuration, resets the failure count.
+// Accounting is intentionally global for the policy because all underlays dial the same
+// destination. A stable underlay is evidence that the destination is not globally flapping.
 type BackoffDialPolicy struct {
 	Dialer              DialUnderlayFactory
 	Backoff             BackoffConfig
 	mu                  sync.Mutex
 	consecutiveFailures uint32
-	lastSuccess         time.Time
+	lastDialSuccess     time.Time
+	lastNegativeEvent   time.Time
 	lastDialTime        time.Time
 	iteration           uint32
 }
@@ -86,23 +96,41 @@ func NewBackoffDialPolicyWithConfig(dialer DialUnderlayFactory, config BackoffCo
 	}
 }
 
-// recordStartDial evaluates the previous connection's lifetime at the start of a new dial.
-// If the last connection was short-lived (< MinStableDuration), it counts as a failure.
-// If it was stable, the failure count is reset.
-func (self *BackoffDialPolicy) recordStartDial() {
+// UnderlayClosed records the lifetime of a closed underlay. A short-lived underlay
+// (lifetime < MinStableDuration) counts as a failure for backoff purposes; a stable one
+// resets the failure count.
+func (self *BackoffDialPolicy) UnderlayClosed(underlayType string, lifetime time.Duration) {
 	self.mu.Lock()
 	defer self.mu.Unlock()
 
-	if self.lastSuccess.IsZero() {
-		return
-	}
-
-	if time.Since(self.lastSuccess) < self.Backoff.MinStableDuration {
+	if lifetime < self.Backoff.MinStableDuration {
 		self.consecutiveFailures++
+		self.lastNegativeEvent = time.Now()
+		pfxlog.Logger().WithField("underlayType", underlayType).
+			WithField("lifetime", lifetime).
+			WithField("consecutiveFailures", self.consecutiveFailures).
+			Info("short-lived underlay closed")
 	} else {
 		self.consecutiveFailures = 0
 	}
-	self.lastSuccess = time.Time{} // reset last success
+}
+
+// resetStaleFailures clears the failure count if the most recent successful dial postdates the
+// last negative event (dial failure or short-lived close) and has aged past MinStableDuration.
+// That connection has proven stable - if it had died young, the resulting UnderlayClosed call
+// would have moved lastNegativeEvent past it. This keeps failures from a past flap episode
+// from imposing backoff after a connection has settled.
+func (self *BackoffDialPolicy) resetStaleFailures() {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+
+	if self.consecutiveFailures == 0 || self.lastDialSuccess.IsZero() {
+		return
+	}
+
+	if self.lastDialSuccess.After(self.lastNegativeEvent) && time.Since(self.lastDialSuccess) >= self.Backoff.MinStableDuration {
+		self.consecutiveFailures = 0
+	}
 }
 
 func (self *BackoffDialPolicy) getBackoffDelay() time.Duration {
@@ -121,16 +149,16 @@ func (self *BackoffDialPolicy) getBackoffDelay() time.Duration {
 func (self *BackoffDialPolicy) recordSuccess() {
 	self.mu.Lock()
 	defer self.mu.Unlock()
-	self.lastSuccess = time.Now()
-	// Don't reset consecutiveFailures yet — wait to see if connection is stable.
-	// Checked on next call to recordShortLivedConnection.
+	self.lastDialSuccess = time.Now()
+	// Don't reset consecutiveFailures yet - wait to see if the connection is stable.
+	// It resets via UnderlayClosed (stable close) or resetStaleFailures (proven lifetime).
 }
 
 func (self *BackoffDialPolicy) recordFailure() {
 	self.mu.Lock()
 	defer self.mu.Unlock()
 	self.consecutiveFailures++
-	self.lastSuccess = time.Time{}
+	self.lastNegativeEvent = time.Now()
 }
 
 // ConsecutiveFailures returns the current consecutive failure count.
@@ -172,7 +200,7 @@ func (self *BackoffDialPolicy) Dial(underlayType string, connectionId string, gr
 	groupId := self.groupConnectionId(connectionId, isFirst)
 	log := pfxlog.Logger().WithField("underlayType", underlayType).WithField("connectionId", groupId).WithField("isFirst", isFirst)
 
-	self.recordStartDial()
+	self.resetStaleFailures()
 
 	if self.Backoff.MinDialInterval > 0 {
 		self.mu.Lock()

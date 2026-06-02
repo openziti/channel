@@ -18,9 +18,10 @@ package channel
 
 import (
 	"crypto/x509"
-	"github.com/michaelquigley/pfxlog"
 	"net"
 	"time"
+
+	"github.com/michaelquigley/pfxlog"
 )
 
 // TypeLoggingUnderlay wraps an Underlay and logs the content type of each transmitted message.
@@ -83,4 +84,8 @@ func (self *TypeLoggingUnderlay) GetLocalAddr() net.Addr {
 
 func (self *TypeLoggingUnderlay) GetRemoteAddr() net.Addr {
 	return self.wrapped.GetRemoteAddr()
+}
+
+func (self *TypeLoggingUnderlay) CreatedAt() time.Time {
+	return self.wrapped.CreatedAt()
 }

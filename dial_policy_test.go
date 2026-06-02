@@ -67,14 +67,14 @@ func Test_BackoffDelay_CappedAtMaxDelay(t *testing.T) {
 	require.Equal(t, time.Second, p.getBackoffDelay())
 }
 
-func Test_RecordFailure_ClearsLastSuccess(t *testing.T) {
+func Test_RecordFailure_RecordsNegativeEvent(t *testing.T) {
 	p := newTestPolicy()
 
 	p.recordSuccess()
-	require.False(t, p.lastSuccess.IsZero())
+	require.False(t, p.lastDialSuccess.IsZero())
 
 	p.recordFailure()
-	require.True(t, p.lastSuccess.IsZero())
+	require.False(t, p.lastNegativeEvent.Before(p.lastDialSuccess))
 	require.Equal(t, uint32(1), p.ConsecutiveFailures())
 }
 
@@ -89,52 +89,53 @@ func Test_RecordSuccess_DoesNotResetFailures(t *testing.T) {
 	require.Equal(t, uint32(2), p.ConsecutiveFailures(), "failures should not reset until connection proves stable")
 }
 
-func Test_RecordStartDial_ShortLivedConnectionCountsAsFailure(t *testing.T) {
+func Test_UnderlayClosed_ShortLivedCountsAsFailure(t *testing.T) {
 	p := newTestPolicy()
 
-	p.recordSuccess()
-	// Call recordStartDial immediately — connection was short-lived
-	p.recordStartDial()
+	p.UnderlayClosed("default", p.Backoff.MinStableDuration/2)
 	require.Equal(t, uint32(1), p.ConsecutiveFailures())
+
+	// repeated short-lived closes escalate
+	p.UnderlayClosed("default", p.Backoff.MinStableDuration/2)
+	require.Equal(t, uint32(2), p.ConsecutiveFailures())
+	require.True(t, p.getBackoffDelay() > 0)
 }
 
-func Test_RecordStartDial_StableConnectionResetsFailures(t *testing.T) {
+func Test_UnderlayClosed_StableLifetimeResetsFailures(t *testing.T) {
 	p := newTestPolicy()
 
-	// Accumulate some failures
 	p.recordFailure()
 	p.recordFailure()
 	p.recordFailure()
 	require.Equal(t, uint32(3), p.ConsecutiveFailures())
 
-	// Simulate a successful connection that lives long enough
-	p.recordSuccess()
-	time.Sleep(p.Backoff.MinStableDuration + 10*time.Millisecond)
-
-	p.recordStartDial()
+	p.UnderlayClosed("default", p.Backoff.MinStableDuration*2)
 	require.Equal(t, uint32(0), p.ConsecutiveFailures())
 	require.Equal(t, time.Duration(0), p.getBackoffDelay())
 }
 
-func Test_RecordStartDial_NoopWithoutPriorSuccess(t *testing.T) {
+func Test_ResetStaleFailures_NoopWithoutPriorSuccess(t *testing.T) {
 	p := newTestPolicy()
 
 	p.recordFailure()
 	p.recordFailure()
 
-	// No success recorded, so recordStartDial should not change failure count
-	p.recordStartDial()
+	// No dial success recorded, so there is no proven-stable connection to reset on.
+	p.resetStaleFailures()
 	require.Equal(t, uint32(2), p.ConsecutiveFailures())
 }
 
-func Test_RecordStartDial_IdempotentOnSecondCall(t *testing.T) {
+func Test_ResetStaleFailures_NoopWhenSuccessPredatesNegativeEvent(t *testing.T) {
 	p := newTestPolicy()
 
+	// A dial succeeded, then that connection died young (UnderlayClosed moved the
+	// negative event past the success). The success proves nothing.
 	p.recordSuccess()
-	p.recordStartDial() // classifies the connection, clears lastSuccess
+	time.Sleep(p.Backoff.MinStableDuration + 10*time.Millisecond)
+	p.UnderlayClosed("default", p.Backoff.MinStableDuration/2)
 	require.Equal(t, uint32(1), p.ConsecutiveFailures())
 
-	p.recordStartDial() // lastSuccess is zero, should be a no-op
+	p.resetStaleFailures()
 	require.Equal(t, uint32(1), p.ConsecutiveFailures())
 }
 
@@ -153,11 +154,11 @@ func Test_FullCycle_FailuresRecoverAfterStableConnection(t *testing.T) {
 	// Failures still elevated — not reset yet
 	require.Equal(t, uint32(3), p.ConsecutiveFailures())
 
-	// Connection lives long enough to be stable
+	// The connection stays up past MinStableDuration without a negative event.
 	time.Sleep(p.Backoff.MinStableDuration + 10*time.Millisecond)
 
-	// Next dial starts: evaluates previous connection as stable, resets failures
-	p.recordStartDial()
+	// Next dial starts: the live connection has proven stable, failures reset
+	p.resetStaleFailures()
 	require.Equal(t, uint32(0), p.ConsecutiveFailures())
 	require.Equal(t, time.Duration(0), p.getBackoffDelay())
 }
@@ -169,17 +170,38 @@ func Test_FullCycle_ShortLivedConnectionEscalatesBackoff(t *testing.T) {
 	p.recordFailure()
 	require.Equal(t, uint32(1), p.ConsecutiveFailures())
 
-	// Second dial succeeds but dies quickly
+	// Second dial succeeds but the underlay dies quickly
 	p.recordSuccess()
-
-	// Next dial starts immediately — short-lived
-	p.recordStartDial()
+	p.UnderlayClosed("default", p.Backoff.MinStableDuration/2)
 	require.Equal(t, uint32(2), p.ConsecutiveFailures())
 
 	// Another success that also dies quickly
 	p.recordSuccess()
-	p.recordStartDial()
+	p.UnderlayClosed("default", p.Backoff.MinStableDuration/2)
 	require.Equal(t, uint32(3), p.ConsecutiveFailures())
+
+	// The young deaths postdate the successes, so nothing resets at dial time.
+	p.resetStaleFailures()
+	require.Equal(t, uint32(3), p.ConsecutiveFailures())
+}
+
+func Test_Dial_ConsecutiveFillDialsDoNotBackoff(t *testing.T) {
+	dialer := &succeedingDialerFactory{}
+	p := NewBackoffDialPolicy(dialer)
+	cancel := make(chan struct{})
+
+	// First underlay (re)establishes the group.
+	_, err := p.Dial("default", "conn-1", []byte("secret"), true, time.Second, cancel)
+	require.NoError(t, err)
+
+	// Additional underlays fill constraints back-to-back (isFirst == false), well within
+	// MinStableDuration. None may be miscounted as short-lived failures or impose backoff.
+	for range 3 {
+		_, err = p.Dial("default", "conn-1", []byte("secret"), false, time.Second, cancel)
+		require.NoError(t, err)
+		require.Equal(t, uint32(0), p.ConsecutiveFailures())
+		require.Equal(t, time.Duration(0), p.getBackoffDelay())
+	}
 }
 
 func Test_Dial_CancelDuringBackoff(t *testing.T) {
@@ -225,7 +247,7 @@ func Test_Dial_FactorySuccessRecordsSuccess(t *testing.T) {
 	underlay, err := p.Dial("default", "conn-1", []byte("secret"), false, time.Second, cancel)
 	require.NoError(t, err)
 	require.NotNil(t, underlay)
-	require.False(t, p.lastSuccess.IsZero())
+	require.False(t, p.lastDialSuccess.IsZero())
 }
 
 func Test_Dial_PassesCorrectHeaders(t *testing.T) {
@@ -305,7 +327,10 @@ type testUnderlay struct {
 	headers      map[int32][]byte
 	connectionId string
 	closed       bool
+	createdAt    time.Time
 }
+
+func (t *testUnderlay) CreatedAt() time.Time { return t.createdAt }
 
 func (t *testUnderlay) Rx() (*Message, error)               { return nil, nil }
 func (t *testUnderlay) Tx(*Message) error                   { return nil }
