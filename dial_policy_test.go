@@ -191,7 +191,7 @@ func Test_Dial_CancelDuringBackoff(t *testing.T) {
 	cancel := make(chan struct{})
 	close(cancel) // already cancelled
 
-	_, err := p.Dial("default", "conn-1", []byte("secret"), time.Second, cancel)
+	_, err := p.Dial("default", "conn-1", []byte("secret"), false, time.Second, cancel)
 	require.Error(t, err)
 	require.IsType(t, ClosedError{}, err)
 }
@@ -202,7 +202,7 @@ func Test_Dial_CancelBeforeDial(t *testing.T) {
 	cancel := make(chan struct{})
 	close(cancel)
 
-	_, err := p.Dial("default", "conn-1", []byte("secret"), time.Second, cancel)
+	_, err := p.Dial("default", "conn-1", []byte("secret"), false, time.Second, cancel)
 	require.Error(t, err)
 	require.IsType(t, ClosedError{}, err)
 }
@@ -212,7 +212,7 @@ func Test_Dial_FactoryFailureRecordsFailure(t *testing.T) {
 	p := NewBackoffDialPolicy(dialer)
 
 	cancel := make(chan struct{})
-	_, err := p.Dial("default", "conn-1", []byte("secret"), time.Second, cancel)
+	_, err := p.Dial("default", "conn-1", []byte("secret"), false, time.Second, cancel)
 	require.Error(t, err)
 	require.Equal(t, uint32(1), p.ConsecutiveFailures())
 }
@@ -222,7 +222,7 @@ func Test_Dial_FactorySuccessRecordsSuccess(t *testing.T) {
 	p := NewBackoffDialPolicy(dialer)
 
 	cancel := make(chan struct{})
-	underlay, err := p.Dial("default", "conn-1", []byte("secret"), time.Second, cancel)
+	underlay, err := p.Dial("default", "conn-1", []byte("secret"), false, time.Second, cancel)
 	require.NoError(t, err)
 	require.NotNil(t, underlay)
 	require.False(t, p.lastSuccess.IsZero())
@@ -233,13 +233,44 @@ func Test_Dial_PassesCorrectHeaders(t *testing.T) {
 	p := NewBackoffDialPolicy(dialer)
 
 	cancel := make(chan struct{})
-	_, err := p.Dial("priority", "conn-42", []byte("mysecret"), time.Second, cancel)
+	_, err := p.Dial("priority", "conn-42", []byte("mysecret"), false, time.Second, cancel)
 	require.NoError(t, err)
 
 	require.Equal(t, "priority", string(dialer.lastHeaders[TypeHeader]))
 	require.Equal(t, "conn-42", string(dialer.lastHeaders[ConnectionIdHeader]))
 	require.Equal(t, []byte("mysecret"), dialer.lastHeaders[GroupSecretHeader])
 	require.Equal(t, []byte{1}, dialer.lastHeaders[IsGroupedHeader])
+
+	// a non-first dial does not mark itself as a first group connection
+	_, found := Headers(dialer.lastHeaders).GetBoolHeader(IsFirstGroupConnection)
+	require.False(t, found)
+}
+
+func Test_Dial_FirstConnectionSetsHeaderAndIteratesId(t *testing.T) {
+	dialer := &succeedingDialerFactory{}
+	p := NewBackoffDialPolicy(dialer)
+
+	cancel := make(chan struct{})
+
+	// first connection: header set, id carries the iteration suffix
+	_, err := p.Dial("default", "conn-7", []byte("secret"), true, time.Second, cancel)
+	require.NoError(t, err)
+	require.Equal(t, "conn-7-1", string(dialer.lastHeaders[ConnectionIdHeader]))
+	isFirst, found := Headers(dialer.lastHeaders).GetBoolHeader(IsFirstGroupConnection)
+	require.True(t, found)
+	require.True(t, isFirst)
+
+	// additional underlay in the same iteration: same id, no first-connection header
+	_, err = p.Dial("default", "conn-7", []byte("secret"), false, time.Second, cancel)
+	require.NoError(t, err)
+	require.Equal(t, "conn-7-1", string(dialer.lastHeaders[ConnectionIdHeader]))
+	_, found = Headers(dialer.lastHeaders).GetBoolHeader(IsFirstGroupConnection)
+	require.False(t, found)
+
+	// reconnect after full loss: a new iteration produces a fresh id
+	_, err = p.Dial("default", "conn-7", []byte("secret"), true, time.Second, cancel)
+	require.NoError(t, err)
+	require.Equal(t, "conn-7-2", string(dialer.lastHeaders[ConnectionIdHeader]))
 }
 
 // failingDialerFactory is a DialUnderlayFactory that always returns an error.

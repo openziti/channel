@@ -17,6 +17,7 @@
 package channel
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -25,8 +26,13 @@ import (
 
 // DialPolicy controls how additional underlays are dialed for a multi-underlay channel.
 // The channel passes all necessary context directly, so implementations are self-contained.
+//
+// isFirst is true when the dial is (re)establishing the group's first underlay - either the
+// initial connection or a reconnect after all underlays were lost. A first connection must
+// set the IsFirstGroupConnection header so the remote MultiListener creates a new channel
+// rather than rejecting the underlay; subsequent underlays attach to the existing group.
 type DialPolicy interface {
-	Dial(underlayType string, connectionId string, groupSecret []byte, connectTimeout time.Duration, cancel <-chan struct{}) (Underlay, error)
+	Dial(underlayType string, connectionId string, groupSecret []byte, isFirst bool, connectTimeout time.Duration, cancel <-chan struct{}) (Underlay, error)
 }
 
 // BackoffConfig controls exponential backoff behavior.
@@ -61,6 +67,7 @@ type BackoffDialPolicy struct {
 	consecutiveFailures uint32
 	lastSuccess         time.Time
 	lastDialTime        time.Time
+	iteration           uint32
 }
 
 // NewBackoffDialPolicy creates a BackoffDialPolicy with default configuration.
@@ -140,9 +147,30 @@ func (self *BackoffDialPolicy) LastDialTime() time.Time {
 	return self.lastDialTime
 }
 
+// groupConnectionId returns the wire connection id to use for this dial. On a first connection it
+// advances the iteration counter so the (re)established group gets a distinct id; the initial
+// iteration (0) uses the base id unchanged so it matches the externally dialed first underlay.
+func (self *BackoffDialPolicy) groupConnectionId(connectionId string, isFirst bool) string {
+	self.mu.Lock()
+	defer self.mu.Unlock()
+	if isFirst {
+		self.iteration++
+	}
+	if self.iteration == 0 {
+		return connectionId
+	}
+	return fmt.Sprintf("%s-%d", connectionId, self.iteration)
+}
+
 // Dial attempts to create a new underlay, applying exponential backoff if previous attempts failed.
-func (self *BackoffDialPolicy) Dial(underlayType string, connectionId string, groupSecret []byte, connectTimeout time.Duration, cancel <-chan struct{}) (Underlay, error) {
-	log := pfxlog.Logger().WithField("underlayType", underlayType).WithField("connectionId", connectionId)
+// When isFirst is true the dial (re)establishes the group: it advances the iteration, derives a
+// fresh iteration-suffixed connection id, and sets the IsFirstGroupConnection header so the remote
+// MultiListener creates a new channel. A fresh id avoids attaching to a still-closing channel of
+// the prior iteration during a loss/reconnect race. Subsequent (isFirst == false) dials reuse the
+// current iteration id with no header, so they attach to the established group.
+func (self *BackoffDialPolicy) Dial(underlayType string, connectionId string, groupSecret []byte, isFirst bool, connectTimeout time.Duration, cancel <-chan struct{}) (Underlay, error) {
+	groupId := self.groupConnectionId(connectionId, isFirst)
+	log := pfxlog.Logger().WithField("underlayType", underlayType).WithField("connectionId", groupId).WithField("isFirst", isFirst)
 
 	self.recordStartDial()
 
@@ -180,12 +208,17 @@ func (self *BackoffDialPolicy) Dial(underlayType string, connectionId string, gr
 	default:
 	}
 
-	underlay, err := self.Dialer.CreateWithHeaders(connectTimeout, map[int32][]byte{
+	headers := map[int32][]byte{
 		TypeHeader:         []byte(underlayType),
-		ConnectionIdHeader: []byte(connectionId),
+		ConnectionIdHeader: []byte(groupId),
 		GroupSecretHeader:  groupSecret,
 		IsGroupedHeader:    {1},
-	})
+	}
+	if isFirst {
+		Headers(headers).PutBoolHeader(IsFirstGroupConnection, true)
+	}
+
+	underlay, err := self.Dialer.CreateWithHeaders(connectTimeout, headers)
 	if err != nil {
 		self.recordFailure()
 		log.WithError(err).Info("dial failed")

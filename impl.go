@@ -826,7 +826,12 @@ func (self *channelImpl) dialUnderlay(underlayType string) {
 		connectTimeout = self.options.ConnectTimeout
 	}
 
-	underlay, err := self.dialPolicy.Dial(underlayType, self.channelId, self.groupSecret, connectTimeout, self.closeNotify)
+	// isFirst is true when no underlays remain, i.e. this dial re-establishes the group after
+	// full loss. The initial underlay is supplied to NewChannel rather than dialed here, so a
+	// first-connection dial only occurs on reconnect.
+	isFirst := len(self.underlays.GetAll()) == 0
+
+	underlay, err := self.dialPolicy.Dial(underlayType, self.channelId, self.groupSecret, isFirst, connectTimeout, self.closeNotify)
 	if err != nil {
 		if self.IsClosed() {
 			log.Debug("dial cancelled, channel closed")
