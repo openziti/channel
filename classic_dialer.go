@@ -107,20 +107,29 @@ func (self *classicDialer) CreateWithHeaders(timeout time.Duration, headers map[
 	return nil, errors.New("timeout waiting for dial")
 }
 
-func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Time, headers map[int32][]byte) error {
+func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Time, headers map[int32][]byte) (err error) {
 	log := pfxlog.ContextLogger(underlay.Label())
 	defer log.Debug("exited")
 	log.Debug("started")
 
+	// Close the underlay (and its transport FD) on any hello failure. Only a fully
+	// successful handshake returns the underlay to the caller; every other path used to
+	// return without closing, leaking the connection.
+	defer func() {
+		if err != nil {
+			_ = underlay.Close()
+		}
+	}()
+
 	peer := underlay.getPeer()
 
-	if err := peer.SetDeadline(deadline); err != nil {
+	if err = peer.SetDeadline(deadline); err != nil {
 		return err
 	}
 
 	defer func() {
-		if err := peer.SetDeadline(time.Time{}); err != nil { // clear write deadline
-			log.WithError(err).Error("unable to clear deadline")
+		if dlErr := peer.SetDeadline(time.Time{}); dlErr != nil { // clear write deadline
+			log.WithError(dlErr).Error("unable to clear deadline")
 		}
 	}()
 
@@ -129,12 +138,12 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 		request.Headers[k] = v
 	}
 	request.SetSequence(HelloSequence)
-	if err := underlay.Tx(request); err != nil {
-		_ = underlay.Close()
+	if err = underlay.Tx(request); err != nil {
 		return err
 	}
 
-	response, err := underlay.Rx()
+	var response *Message
+	response, err = underlay.Rx()
 	if err != nil {
 		if errors.Is(err, BadMagicNumberError) {
 			return fmt.Errorf("could not negotiate connection with %v, invalid header", peer.RemoteAddr().String())
