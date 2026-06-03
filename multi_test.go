@@ -239,10 +239,25 @@ func (self *priorityChannelBase) CloseRandom(ch Channel) {
 	mc.lock.Lock()
 	defer mc.lock.Unlock()
 	underlays := mc.underlays.GetAll()
-	if len(underlays) > 0 {
-		idx := rand.Intn(len(underlays))
-		underlay := underlays[idx]
-		_ = underlay.Close()
+
+	// Only close an underlay whose type would still meet its required Min afterwards.
+	// Closing the last required underlay (e.g. default, Min: 1) would drop the channel
+	// below minimum and close it; that is not what this churn test exercises, and it
+	// raced with the random close interval, making the test flaky.
+	counts := map[string]int{}
+	for _, u := range underlays {
+		counts[GetUnderlayType(u)]++
+	}
+	var closeable []Underlay
+	for _, u := range underlays {
+		t := GetUnderlayType(u)
+		if counts[t]-1 < mc.constraints[t].Min {
+			continue
+		}
+		closeable = append(closeable, u)
+	}
+	if len(closeable) > 0 {
+		_ = closeable[rand.Intn(len(closeable))].Close()
 	}
 }
 
