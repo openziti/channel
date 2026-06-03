@@ -186,3 +186,28 @@ func (l *testUnderlayListenerF) UnderlayRemoved(ch Channel, u Underlay) {
 		l.onRemoved(ch, u)
 	}
 }
+
+// Test_applyConstraints_ClosesBelowMinEvenWhenApplyInProgress is the regression test for the
+// ordering bug where applyConstraints took the in-progress guard before checking min-validity.
+// A required-underlay loss must close the channel promptly even when another constraint
+// fill / dial backoff is already running, rather than waiting for that dial to return.
+func Test_applyConstraints_ClosesBelowMinEvenWhenApplyInProgress(t *testing.T) {
+	impl := &channelImpl{
+		constraints: map[string]UnderlayConstraint{"default": {Desired: 1, Min: 1}},
+		underlays:   NewUnderlays(),
+		closeNotify: make(chan struct{}),
+	}
+	// fallbackUnderlay backs Label()/Underlay(), used by the close-path logging.
+	var u Underlay = &testUnderlay{}
+	impl.fallbackUnderlay.Store(&u)
+
+	// Simulate an applyConstraints run already in progress (e.g. a dial backing off).
+	impl.applyInProgress.Store(true)
+
+	// No underlays remain, so the channel is below the default Min of 1. The min-validity
+	// close check runs before the in-progress guard, so the channel closes immediately
+	// rather than waiting for the in-progress dial.
+	impl.applyConstraints()
+
+	require.True(t, impl.IsClosed(), "channel below min must close even while applyInProgress is held")
+}
