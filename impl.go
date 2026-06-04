@@ -703,6 +703,19 @@ func (self *channelImpl) applyConstraints() {
 		return
 	}
 
+	if self.IsClosed() {
+		return
+	}
+
+	// Check min-validity (and close if below minimum) BEFORE taking the in-progress
+	// guard. A required-underlay loss must close the channel promptly even when another
+	// constraint fill or dial backoff is already running; otherwise the close would be
+	// deferred until that in-progress dial returns (up to the full backoff delay).
+	// Closing here also cancels any in-flight dial, since it closes closeNotify.
+	if !self.checkConstraintsValid(true) {
+		return
+	}
+
 	if !self.applyInProgress.CompareAndSwap(false, true) {
 		return
 	}
@@ -720,14 +733,6 @@ func (self *channelImpl) applyConstraints() {
 			go self.applyConstraints()
 		}
 	}()
-
-	if self.IsClosed() {
-		return
-	}
-
-	if !self.checkConstraintsValid(true) {
-		return
-	}
 
 	if self.dialPolicy == nil {
 		return
