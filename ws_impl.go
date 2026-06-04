@@ -20,10 +20,11 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"github.com/openziti/identity"
-	"github.com/openziti/transport/v2"
 	"sync"
 	"time"
+
+	"github.com/openziti/identity"
+	"github.com/openziti/transport/v2"
 )
 
 type wsImpl struct {
@@ -35,6 +36,11 @@ type wsImpl struct {
 	closed       bool
 	readF        readFunction
 	marshalF     marshalFunction
+	createdAt    time.Time
+}
+
+func (self *wsImpl) CreatedAt() time.Time {
+	return self.createdAt
 }
 
 func (self *wsImpl) SetWriteTimeout(duration time.Duration) error {
@@ -123,8 +129,9 @@ func newWSImpl(peer transport.Conn, version uint32) *wsImpl {
 	}
 
 	return &wsImpl{
-		peer:     peer,
-		readF:    readF,
-		marshalF: marshalF,
+		peer:      peer,
+		readF:     readF,
+		marshalF:  marshalF,
+		createdAt: time.Now(),
 	}
 }

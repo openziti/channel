@@ -20,10 +20,11 @@ import (
 	"bytes"
 	"crypto/x509"
 	"fmt"
-	"github.com/openziti/transport/v2"
 	"net"
 	"sync/atomic"
 	"time"
+
+	"github.com/openziti/transport/v2"
 )
 
 type readPacketFunction func(buf []byte) (*Message, error)
@@ -37,6 +38,11 @@ type DatagramUnderlay struct {
 	closed       atomic.Bool
 	readF        readPacketFunction
 	marshalF     marshalFunction
+	createdAt    time.Time
+}
+
+func (self *DatagramUnderlay) CreatedAt() time.Time {
+	return self.createdAt
 }
 
 func newDatagramUnderlay(messageStrategy MessageStrategy, peer transport.Conn, version uint32) classicUnderlay {
@@ -60,9 +66,10 @@ func newDatagramUnderlay(messageStrategy MessageStrategy, peer transport.Conn, v
 	}
 
 	return &DatagramUnderlay{
-		peer:     peer,
-		readF:    readF,
-		marshalF: marshalF,
+		peer:      peer,
+		readF:     readF,
+		marshalF:  marshalF,
+		createdAt: time.Now(),
 	}
 }
 

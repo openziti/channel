@@ -19,28 +19,35 @@ package websockets
 import (
 	"bytes"
 	"crypto/x509"
+	"net"
+	"sync/atomic"
+	"time"
+
 	"github.com/gorilla/websocket"
 	"github.com/openziti/channel/v5"
 	"github.com/openziti/identity"
 	"github.com/pkg/errors"
-	"net"
-	"sync/atomic"
-	"time"
 )
 
 type Underlay struct {
-	id     *identity.TokenId
-	peer   *websocket.Conn
-	closed atomic.Bool
-	certs  []*x509.Certificate
+	id        *identity.TokenId
+	peer      *websocket.Conn
+	closed    atomic.Bool
+	certs     []*x509.Certificate
+	createdAt time.Time
 }
 
 func NewUnderlayFactory(id *identity.TokenId, peer *websocket.Conn, certs []*x509.Certificate) channel.UnderlayFactory {
 	return &Underlay{
-		id:    id,
-		peer:  peer,
-		certs: certs,
+		id:        id,
+		peer:      peer,
+		certs:     certs,
+		createdAt: time.Now(),
 	}
+}
+
+func (self *Underlay) CreatedAt() time.Time {
+	return self.createdAt
 }
 
 func (self *Underlay) GetLocalAddr() net.Addr {

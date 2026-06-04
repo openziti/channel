@@ -19,15 +19,16 @@ package channel
 import (
 	"crypto/x509"
 	"fmt"
+	"io"
+	"net"
+	"sync/atomic"
+	"time"
+
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
-	"io"
-	"net"
-	"sync/atomic"
-	"time"
 )
 
 func (impl *reconnectingImpl) Rx() (*Message, error) {
@@ -134,6 +135,7 @@ func newReconnectingImpl(peer transport.Conn, reconnectionHandler reconnectionHa
 		readF:               ReadV2,
 		marshalF:            MarshalV2,
 		timeout:             timeout,
+		createdAt:           time.Now(),
 	}
 }
 
@@ -228,6 +230,13 @@ type reconnectingImpl struct {
 	disconnected        atomic.Bool
 	reconnecting        atomic.Bool
 	timeout             time.Duration
+	createdAt           time.Time
+}
+
+// CreatedAt returns the time the underlay was originally created. It is not updated
+// when the underlay internally reconnects.
+func (impl *reconnectingImpl) CreatedAt() time.Time {
+	return impl.createdAt
 }
 
 func (impl *reconnectingImpl) GetLocalAddr() net.Addr {

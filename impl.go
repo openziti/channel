@@ -674,13 +674,21 @@ func (self *channelImpl) UnderlayAdded(ch Channel, underlay Underlay) {
 		Info("underlay added")
 }
 
-// UnderlayRemoved implements UnderlayEventListener. Checks constraints and triggers re-dial if needed.
+// UnderlayRemoved implements UnderlayEventListener. Reports the underlay's lifetime to the
+// dial policy for stability accounting, then checks constraints and triggers re-dial if needed.
 func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay) {
+	lifetime := time.Since(underlay.CreatedAt())
+
 	pfxlog.Logger().
 		WithField("id", ch.Label()).
 		WithField("underlays", ch.GetUnderlayCountsByType()).
 		WithField("underlayType", GetUnderlayType(underlay)).
+		WithField("lifetime", lifetime).
 		Info("underlay removed")
+
+	if self.dialPolicy != nil {
+		self.dialPolicy.UnderlayClosed(self.getValidatedUnderlayType(underlay), lifetime)
+	}
 
 	if len(self.constraints) == 0 && self.dialPolicy == nil {
 		// No constraints or dial policy means this is a simple channel that cannot
@@ -829,7 +837,12 @@ func (self *channelImpl) dialUnderlay(underlayType string) {
 		connectTimeout = self.options.ConnectTimeout
 	}
 
-	underlay, err := self.dialPolicy.Dial(underlayType, self.channelId, self.groupSecret, connectTimeout, self.closeNotify)
+	// isFirst is true when no underlays remain, i.e. this dial re-establishes the group after
+	// full loss. The initial underlay is supplied to NewChannel rather than dialed here, so a
+	// first-connection dial only occurs on reconnect.
+	isFirst := len(self.underlays.GetAll()) == 0
+
+	underlay, err := self.dialPolicy.Dial(underlayType, self.channelId, self.groupSecret, isFirst, connectTimeout, self.closeNotify)
 	if err != nil {
 		if self.IsClosed() {
 			log.Debug("dial cancelled, channel closed")

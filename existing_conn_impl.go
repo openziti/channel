@@ -37,6 +37,11 @@ type existingConnImpl struct {
 	closed       atomic.Bool
 	readF        readFunction
 	marshalF     marshalFunction
+	createdAt    time.Time
+}
+
+func (impl *existingConnImpl) CreatedAt() time.Time {
+	return impl.createdAt
 }
 
 func (impl *existingConnImpl) GetLocalAddr() net.Addr {
@@ -139,8 +144,9 @@ func newExistingImpl(peer net.Conn, version uint32) *existingConnImpl {
 	}
 
 	return &existingConnImpl{
-		peer:     peer,
-		readF:    readF,
-		marshalF: marshalF,
+		peer:      peer,
+		readF:     readF,
+		marshalF:  marshalF,
+		createdAt: time.Now(),
 	}
 }
