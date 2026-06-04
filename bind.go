@@ -174,24 +174,39 @@ func (self *bindingImpl[S]) GetUserData() any {
 	return self.ch.userData
 }
 
-// MakeTypedBinder creates a binder function from a TypedBindHandler and senders.
-func MakeTypedBinder[S Senders](senders S, handler TypedBindHandler[S]) func(*channelImpl) error {
-	return func(ch *channelImpl) error {
+// Binder is an installed bind handler, produced by MakeBinder or MakeTypedBinder and
+// supplied to a channel via Config.Binder. It is opaque: consumers obtain one from the
+// factory functions rather than constructing it directly.
+type Binder struct {
+	fn func(*channelImpl) error
+}
+
+// bind runs the wrapped bind handler against the given channel. A zero Binder is a no-op.
+func (self Binder) bind(ch *channelImpl) error {
+	if self.fn == nil {
+		return nil
+	}
+	return self.fn(ch)
+}
+
+// MakeTypedBinder creates a Binder from a TypedBindHandler and senders.
+func MakeTypedBinder[S Senders](senders S, handler TypedBindHandler[S]) Binder {
+	return Binder{fn: func(ch *channelImpl) error {
 		if handler == nil {
 			return nil
 		}
 		binding := &bindingImpl[S]{ch: ch, senders: senders}
 		return handler.BindChannel(binding)
-	}
+	}}
 }
 
-// MakeBinder creates a binder function from a BindHandler.
-func MakeBinder(handler BindHandler) func(*channelImpl) error {
-	return func(ch *channelImpl) error {
+// MakeBinder creates a Binder from a BindHandler.
+func MakeBinder(handler BindHandler) Binder {
+	return Binder{fn: func(ch *channelImpl) error {
 		if handler == nil {
 			return nil
 		}
 		binding := &bindingImpl[Senders]{ch: ch, senders: ch.senders}
 		return handler.BindChannel(binding)
-	}
+	}}
 }
