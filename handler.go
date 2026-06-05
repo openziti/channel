@@ -51,6 +51,39 @@ func (self ReceiveHandlerF) HandleReceive(m *Message, ch Channel) {
 	self(m, ch)
 }
 
+// ContentTypeReceiver is a receive handler which reports the content type it handles.
+// It allows handlers to be registered without separately specifying the content type,
+// using AddReceiveHandlers.
+type ContentTypeReceiver interface {
+	ContentType() int32
+	ReceiveHandler
+}
+
+// AddReceiveHandlers registers receive handlers which provide their own content type.
+func AddReceiveHandlers(binding Binding, handlers ...ContentTypeReceiver) {
+	for _, h := range handlers {
+		binding.AddReceiveHandler(h.ContentType(), h)
+	}
+}
+
+// AsyncFunctionReceiveAdapter is a ContentTypeReceiver which handles each message
+// in a new goroutine, for handlers which may block or run long. Receive handlers
+// are otherwise invoked on the channel's receive loop.
+type AsyncFunctionReceiveAdapter struct {
+	Type    int32
+	Handler ReceiveHandlerF
+}
+
+// ContentType returns the message content type this handler processes.
+func (adapter *AsyncFunctionReceiveAdapter) ContentType() int32 {
+	return adapter.Type
+}
+
+// HandleReceive dispatches the message to the wrapped handler in a new goroutine.
+func (adapter *AsyncFunctionReceiveAdapter) HandleReceive(m *Message, ch Channel) {
+	go adapter.Handler(m, ch)
+}
+
 // MsgReceiveHandler handles received messages without channel context.
 type MsgReceiveHandler interface {
 	HandleReceive(m *Message)
