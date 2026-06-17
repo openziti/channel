@@ -42,7 +42,12 @@ type MultiListener struct {
 }
 
 // AcceptUnderlay routes an incoming underlay to an existing channel or creates a new one.
-func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
+// It implements HelloAcceptor: for a grouped first connection it registers the group
+// (reserving its id) before acknowledging the hello, so the ack - which releases the
+// dialer to dial subsequent underlays - cannot precede the group being known. A
+// subsequent underlay therefore always finds either the channel or a create-in-progress
+// notifier and attaches, rather than racing group creation and being rejected.
+func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() error) {
 	isGrouped, _ := Headers(underlay.Headers()).GetBoolHeader(IsGroupedHeader)
 
 	log := pfxlog.Logger().
@@ -51,6 +56,11 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 		WithField("isGrouped", isGrouped)
 
 	if !isGrouped {
+		if err := ackHello(); err != nil {
+			log.WithError(err).Error("error acknowledging hello")
+			_ = underlay.Close()
+			return
+		}
 		if err := self.ungroupedChannelFallback(underlay); err != nil {
 			log.WithError(err).Error("failed to create channel")
 			if closeErr := underlay.Close(); closeErr != nil {
@@ -79,6 +89,20 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 			var createLockExists bool
 			waitFor, createLockExists = self.createNotifiers[chId]
 			if !createLockExists {
+				if !isFirst {
+					// No channel and no create in progress for a non-first underlay: its group
+					// is gone (or this is a stale/old-iteration underlay). Close without acking
+					// so the dialer's create fails promptly rather than seeing a short-lived,
+					// acked-then-closed underlay. This cannot happen for a live reconnect: the
+					// group's first connection registers the notifier below before its own ack
+					// releases the dialer to dial these subsequent underlays.
+					self.lock.Unlock()
+					log.Info("no existing channel found for non-first underlay, closing connection")
+					if err := underlay.Close(); err != nil {
+						log.WithError(err).Error("error closing underlay")
+					}
+					return
+				}
 				createLockNotifier = make(chan struct{})
 				self.createNotifiers[chId] = createLockNotifier
 				done = true
@@ -100,6 +124,21 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 		}
 	}
 
+	// The group is now registered (an existing channel, or our create-in-progress
+	// notifier). Acknowledge the hello: this releases the dialer to dial subsequent
+	// underlays, which will now find the group rather than racing its creation.
+	if err := ackHello(); err != nil {
+		log.WithError(err).Error("error acknowledging hello")
+		if createLockNotifier != nil {
+			self.lock.Lock()
+			delete(self.createNotifiers, chId)
+			close(createLockNotifier)
+			self.lock.Unlock()
+		}
+		_ = underlay.Close()
+		return
+	}
+
 	if createLockNotifier != nil {
 		defer func() {
 			self.lock.Lock()
@@ -115,14 +154,6 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay) {
 			log.WithError(err).Error("error accepting underlay")
 		}
 	} else {
-		if !isFirst {
-			log.Info("no existing channel found for underlay, but isFirstGroupConnection not set, closing connection")
-			if err := underlay.Close(); err != nil {
-				log.WithError(err).Error("error closing underlay")
-			}
-			return
-		}
-
 		log.Info("no existing channel found for underlay")
 		var err error
 		ch, err = self.multiChannelFactory(underlay, func() {

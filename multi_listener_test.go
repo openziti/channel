@@ -48,6 +48,17 @@ func newUngroupedTestUnderlay(connId string) *testUnderlay {
 	}
 }
 
+// ackOK is a no-op hello acknowledgement for tests that don't care about ack timing.
+func ackOK() error { return nil }
+
+// helloAcceptorFunc adapts a full-signature accept function to a HelloAcceptor, for
+// callers that need control over the ack (e.g. to wrap the underlay first).
+type helloAcceptorFunc func(underlay Underlay, ackHello func() error)
+
+func (f helloAcceptorFunc) AcceptUnderlay(underlay Underlay, ackHello func() error) {
+	f(underlay, ackHello)
+}
+
 func Test_MultiListener_FirstGroupedCreatesChannel(t *testing.T) {
 	var factoryCalled atomic.Bool
 
@@ -58,7 +69,7 @@ func Test_MultiListener_FirstGroupedCreatesChannel(t *testing.T) {
 		return errors.New("ungrouped not expected")
 	})
 
-	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true))
+	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), ackOK)
 
 	require.True(t, factoryCalled.Load())
 
@@ -77,9 +88,11 @@ func Test_MultiListener_NonFirstWithNoExistingChannelClosesUnderlay(t *testing.T
 	})
 
 	underlay := newGroupedTestUnderlay("conn-1", false)
-	ml.AcceptUnderlay(underlay)
+	acked := false
+	ml.AcceptUnderlay(underlay, func() error { acked = true; return nil })
 
-	require.True(t, underlay.closed, "underlay should be closed when not first and no existing channel")
+	require.True(t, underlay.closed, "underlay should be closed when not first and no group exists")
+	require.False(t, acked, "hello should not be acked when rejecting a non-first underlay with no group")
 }
 
 func Test_MultiListener_UngroupedDelegatesToFallback(t *testing.T) {
@@ -93,7 +106,7 @@ func Test_MultiListener_UngroupedDelegatesToFallback(t *testing.T) {
 		return nil
 	})
 
-	ml.AcceptUnderlay(newUngroupedTestUnderlay("conn-1"))
+	ml.AcceptUnderlay(newUngroupedTestUnderlay("conn-1"), ackOK)
 
 	require.True(t, fallbackCalled.Load())
 }
@@ -106,7 +119,7 @@ func Test_MultiListener_UngroupedFallbackErrorClosesUnderlay(t *testing.T) {
 	})
 
 	underlay := newUngroupedTestUnderlay("conn-1")
-	ml.AcceptUnderlay(underlay)
+	ml.AcceptUnderlay(underlay, ackOK)
 
 	require.True(t, underlay.closed, "underlay should be closed when fallback errors")
 }
@@ -119,7 +132,7 @@ func Test_MultiListener_FactoryNilNilReturnsError(t *testing.T) {
 	})
 
 	underlay := newGroupedTestUnderlay("conn-1", true)
-	ml.AcceptUnderlay(underlay)
+	ml.AcceptUnderlay(underlay, ackOK)
 
 	require.True(t, underlay.closed, "underlay should be closed when factory returns nil/nil")
 
@@ -138,9 +151,9 @@ func Test_MultiListener_SecondUnderlayRoutedToExistingChannel(t *testing.T) {
 		return nil
 	})
 
-	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true))
+	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), ackOK)
 
-	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", false))
+	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", false), ackOK)
 
 	require.Equal(t, 1, ch.acceptCount, "second underlay should be accepted by existing channel")
 }
@@ -162,12 +175,12 @@ func Test_MultiListener_ConcurrentFirstUnderlaySameId(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true))
+		ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), ackOK)
 	}()
 
 	go func() {
 		defer wg.Done()
-		ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true))
+		ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), ackOK)
 	}()
 
 	// Wait for factory to be called once, then release
@@ -191,7 +204,7 @@ func Test_MultiListener_CloseChannelRemovesFromMap(t *testing.T) {
 		return nil
 	})
 
-	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true))
+	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), ackOK)
 
 	ml.lock.Lock()
 	_, exists := ml.channels["conn-1"]
@@ -204,6 +217,103 @@ func Test_MultiListener_CloseChannelRemovesFromMap(t *testing.T) {
 	_, exists = ml.channels["conn-1"]
 	ml.lock.Unlock()
 	require.False(t, exists)
+}
+
+// Test_MultiListener_GroupReservedBeforeAck verifies the core ordering guarantee: when
+// a grouped first connection's hello is acknowledged, the group is already registered
+// (a channel or a create-in-progress notifier). The ack is what releases the dialer to
+// dial subsequent underlays, so reserving before it ensures those underlays can never
+// reach the listener before the group is known.
+func Test_MultiListener_GroupReservedBeforeAck(t *testing.T) {
+	ml := NewMultiListener(func(underlay Underlay, closeCallback func()) (Channel, error) {
+		return &testChannel{connId: underlay.ConnectionId()}, nil
+	}, func(underlay Underlay) error {
+		return errors.New("ungrouped not expected")
+	})
+
+	reservedAtAck := false
+	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), func() error {
+		ml.lock.Lock()
+		_, hasChannel := ml.channels["conn-1"]
+		_, hasNotifier := ml.createNotifiers["conn-1"]
+		ml.lock.Unlock()
+		reservedAtAck = hasChannel || hasNotifier
+		return nil
+	})
+
+	require.True(t, reservedAtAck, "group must be reserved before the hello is acknowledged")
+}
+
+// Test_MultiListener_AckFailureReleasesReservation verifies that if the hello ack fails
+// for a first connection, the reservation is released (so future dials on that id aren't
+// stranded) and no channel is created.
+func Test_MultiListener_AckFailureReleasesReservation(t *testing.T) {
+	factoryCalled := false
+	ml := NewMultiListener(func(underlay Underlay, closeCallback func()) (Channel, error) {
+		factoryCalled = true
+		return &testChannel{connId: underlay.ConnectionId()}, nil
+	}, func(underlay Underlay) error {
+		return errors.New("ungrouped not expected")
+	})
+
+	underlay := newGroupedTestUnderlay("conn-1", true)
+	ml.AcceptUnderlay(underlay, func() error { return errors.New("ack failed") })
+
+	require.True(t, underlay.closed, "underlay should be closed when the ack fails")
+	require.False(t, factoryCalled, "channel should not be created when the ack fails")
+
+	ml.lock.Lock()
+	_, hasChannel := ml.channels["conn-1"]
+	_, hasNotifier := ml.createNotifiers["conn-1"]
+	ml.lock.Unlock()
+	require.False(t, hasChannel, "no channel should be registered after an ack failure")
+	require.False(t, hasNotifier, "the create-notifier should be released after an ack failure")
+}
+
+// Test_MultiListener_NonFirstAttachesWhileFirstInFlight verifies the reconnect-race fix:
+// a subsequent underlay that arrives while its group's first connection is still being
+// created waits for the group and attaches, rather than being rejected.
+func Test_MultiListener_NonFirstAttachesWhileFirstInFlight(t *testing.T) {
+	var ch *testChannel
+	var factoryCallCount atomic.Int32
+	factoryGate := make(chan struct{})
+
+	ml := NewMultiListener(func(underlay Underlay, closeCallback func()) (Channel, error) {
+		factoryCallCount.Add(1)
+		<-factoryGate
+		ch = &testChannel{connId: underlay.ConnectionId()}
+		return ch, nil
+	}, func(underlay Underlay) error {
+		return errors.New("ungrouped not expected")
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// First connection enters the (gated) factory, holding the create-notifier.
+	go func() {
+		defer wg.Done()
+		ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), ackOK)
+	}()
+	for factoryCallCount.Load() < 1 {
+		time.Sleep(time.Millisecond)
+	}
+
+	// Subsequent underlay arrives while the first is still being created.
+	nonFirst := newGroupedTestUnderlay("conn-1", false)
+	go func() {
+		defer wg.Done()
+		ml.AcceptUnderlay(nonFirst, ackOK)
+	}()
+
+	// Give the subsequent underlay time to reach the wait, then let the factory finish.
+	time.Sleep(20 * time.Millisecond)
+	close(factoryGate)
+	wg.Wait()
+
+	require.False(t, nonFirst.closed, "subsequent underlay should attach while the first is in flight, not be rejected")
+	require.Equal(t, int32(1), factoryCallCount.Load(), "factory should be called once")
+	require.Equal(t, 1, ch.acceptCount, "subsequent underlay should be accepted by the group's channel")
 }
 
 // testChannel is a minimal Channel implementation for MultiListener tests.

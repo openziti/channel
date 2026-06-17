@@ -126,13 +126,13 @@ func Test_MultiUnderlayChannels(t *testing.T) {
 		},
 	}
 
-	acceptWrapper := func(underlay Underlay) {
+	acceptor := helloAcceptorFunc(func(underlay Underlay, ackHello func() error) {
 		wrapper := &TypeLoggingUnderlay{
 			wrapped: underlay,
 		}
-		multiListener.AcceptUnderlay(wrapper)
-	}
-	listener, err := NewClassicListenerF(&identity.TokenId{Token: "test-server"}, listenAddr, listenerConfig, acceptWrapper)
+		multiListener.AcceptUnderlay(wrapper, ackHello)
+	})
+	listener, err := NewClassicListenerWithAcceptor(&identity.TokenId{Token: "test-server"}, listenAddr, listenerConfig, acceptor)
 	req.NoError(err)
 	defer func() { _ = listener.Close() }()
 
