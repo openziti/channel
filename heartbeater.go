@@ -99,6 +99,18 @@ type HeartbeatCallback interface {
 	CheckHeartBeat()
 }
 
+// HeartbeatControl retunes the heartbeat timing of a running channel. It is
+// returned by ConfigureHeartbeat so a caller can change the send and check
+// intervals without rebuilding the channel, for example when applying updated
+// configuration to an established link. UpdateIntervals is meant to be called
+// from a single goroutine per channel.
+type HeartbeatControl interface {
+	// UpdateIntervals changes the heartbeat send and check intervals. The send
+	// interval takes effect on the next outbound message; the check interval on
+	// the next pulse of the heartbeat loop.
+	UpdateIntervals(sendInterval, checkInterval time.Duration)
+}
+
 // ConfigureHeartbeat setups up heartbeats on the given channel. It assumes that an equivalent setup happens on the
 // other side of the channel.
 //
@@ -109,30 +121,52 @@ type HeartbeatCallback interface {
 // Similarly, when a message with a heartbeat header is received, the next sent message will have a header set with
 // the heartbeat response. If no message is sent within a few milliseconds, a standalone heartbeat response will be
 // sent
-func ConfigureHeartbeat(binding Binding, heartbeatInterval time.Duration, checkInterval time.Duration, cb HeartbeatCallback) {
+//
+// The returned HeartbeatControl can be used to retune the send and check
+// intervals later without rebuilding the channel.
+func ConfigureHeartbeat(binding Binding, heartbeatInterval time.Duration, checkInterval time.Duration, cb HeartbeatCallback) HeartbeatControl {
 	hb := &heartbeater{
-		ch:                  binding.GetChannel(),
-		heartBeatIntervalNs: heartbeatInterval.Nanoseconds(),
-		callback:            cb,
-		events:              make(chan heartbeatEvent, 4),
+		ch:        binding.GetChannel(),
+		callback:  cb,
+		events:    make(chan heartbeatEvent, 4),
+		reconfigC: make(chan time.Duration, 1),
 	}
+	hb.heartBeatIntervalNs.Store(heartbeatInterval.Nanoseconds())
 
 	binding.AddReceiveHandler(ContentTypeHeartbeat, hb)
 	binding.AddTransformHandler(hb)
 
 	go hb.pulse(checkInterval)
+
+	return hb
 }
 
-// Note: if altering this struct, be sure to account for 64 bit alignment on 32 bit arm arch
-// https://pkg.go.dev/sync/atomic#pkg-note-BUG
-// https://github.com/golang/go/issues/36606
+// UpdateIntervals implements HeartbeatControl.
+func (self *heartbeater) UpdateIntervals(sendInterval, checkInterval time.Duration) {
+	self.heartBeatIntervalNs.Store(sendInterval.Nanoseconds())
+
+	// The pulse goroutine owns the ticker, so hand the new check interval to it
+	// rather than touching the ticker here. Drain any value pulse hasn't
+	// consumed so the latest request wins, and keep the send non-blocking so
+	// callers never stall on a busy pulse loop.
+	select {
+	case <-self.reconfigC:
+	default:
+	}
+	select {
+	case self.reconfigC <- checkInterval:
+	default:
+	}
+}
+
 type heartbeater struct {
 	ch                   Channel
-	lastHeartbeatTx      int64
-	heartBeatIntervalNs  int64
-	unrespondedHeartbeat int64
+	lastHeartbeatTx      atomic.Int64
+	heartBeatIntervalNs  atomic.Int64
+	unrespondedHeartbeat atomic.Int64
 	callback             HeartbeatCallback
 	events               chan heartbeatEvent
+	reconfigC            chan time.Duration
 }
 
 func (self *heartbeater) HandleReceive(*Message, Channel) {
@@ -161,15 +195,15 @@ func (self *heartbeater) Tx(m *Message, _ Channel) {
 		return
 	}
 	now := time.Now().UnixNano()
-	if now-self.lastHeartbeatTx > self.heartBeatIntervalNs {
+	if now-self.lastHeartbeatTx.Load() > self.heartBeatIntervalNs.Load() {
 		m.PutUint64Header(HeartbeatHeader, uint64(now))
-		atomic.StoreInt64(&self.lastHeartbeatTx, now)
+		self.lastHeartbeatTx.Store(now)
 		self.queueEvent(heartbeatTxEvent(now))
 	}
 
-	if unrespondedHeartbeat := atomic.LoadInt64(&self.unrespondedHeartbeat); unrespondedHeartbeat != 0 {
+	if unrespondedHeartbeat := self.unrespondedHeartbeat.Load(); unrespondedHeartbeat != 0 {
 		m.PutUint64Header(HeartbeatResponseHeader, uint64(unrespondedHeartbeat))
-		atomic.StoreInt64(&self.unrespondedHeartbeat, 0)
+		self.unrespondedHeartbeat.Store(0)
 		self.queueEvent(heartbeatRespTxEvent(now))
 	}
 }
@@ -182,14 +216,21 @@ func (self *heartbeater) pulse(checkInterval time.Duration) {
 		select {
 		case tick := <-ticker.C:
 			now := tick.UnixNano()
-			lastHeartbeatTx := atomic.LoadInt64(&self.lastHeartbeatTx)
-			if now-lastHeartbeatTx > self.heartBeatIntervalNs {
+			lastHeartbeatTx := self.lastHeartbeatTx.Load()
+			if now-lastHeartbeatTx > self.heartBeatIntervalNs.Load() {
 				self.sendHeartbeat()
 			}
 			self.callback.CheckHeartBeat()
 
 		case event := <-self.events:
 			event.handle(self)
+
+		case newCheckInterval := <-self.reconfigC:
+			// time.Ticker.Reset panics on a non-positive duration, so ignore
+			// invalid requests and keep the current interval.
+			if newCheckInterval > 0 {
+				ticker.Reset(newCheckInterval)
+			}
 		}
 	}
 }
@@ -225,7 +266,7 @@ func (h heartbeatTxEvent) handle(heartbeater *heartbeater) {
 type heartbeatRxEvent int64
 
 func (h heartbeatRxEvent) handle(heartbeater *heartbeater) {
-	atomic.StoreInt64(&heartbeater.unrespondedHeartbeat, int64(h))
+	heartbeater.unrespondedHeartbeat.Store(int64(h))
 	heartbeater.callback.HeartbeatRx(int64(h))
 
 	// wait a few milliseconds to allowing already queued traffic to respond to the heartbeat
@@ -252,7 +293,7 @@ func (h heartbeatRespRxEvent) handle(heartbeater *heartbeater) {
 type handleUnresponded struct{}
 
 func (h handleUnresponded) handle(heartbeater *heartbeater) {
-	if unrespondedHeartbeat := atomic.LoadInt64(&heartbeater.unrespondedHeartbeat); unrespondedHeartbeat != 0 {
+	if unrespondedHeartbeat := heartbeater.unrespondedHeartbeat.Load(); unrespondedHeartbeat != 0 {
 		heartbeater.sendHeartbeatIfQueueFree()
 	}
 }
