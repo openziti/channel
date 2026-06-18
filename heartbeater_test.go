@@ -105,6 +105,11 @@ func TestBaselineHeartbeat(t *testing.T) {
 					return
 				}
 				count++
+				// Pace the loop so it doesn't spin flat-out. Unbounded sending pegs the CPU
+				// and starves the tx/rx goroutines, which on a loaded CI runner lets the send
+				// queue back up past the enqueue timeout, an expected backpressure condition
+				// this test isn't meant to provoke. Matches TestBusyHeartbeat.
+				time.Sleep(time.Millisecond)
 			}
 		}()
 	}
@@ -134,6 +139,9 @@ func TestBaselineHeartbeat(t *testing.T) {
 			req.NoError(err)
 		}
 		count++
+		// See the matching note on the server loop above: pace sends so the queue doesn't
+		// saturate under CI load and trip the enqueue timeout.
+		time.Sleep(time.Millisecond)
 	}
 
 	var remoteCount uint64
