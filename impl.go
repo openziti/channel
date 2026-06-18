@@ -28,7 +28,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/foundation/v2/info"
@@ -233,11 +232,16 @@ func NewChannel(config *Config) (Channel, error) {
 	impl.ownerId = config.Underlay.Id()
 	impl.fallbackUnderlay.Store(&config.Underlay)
 
-	groupSecret := config.Underlay.Headers()[GroupSecretHeader]
-	if len(groupSecret) == 0 {
-		return nil, errors.New("no group secret header found for channel")
+	// The group secret matches reconnecting or additional underlays to this channel, so it is
+	// only required for channels that can grow: those with a dial policy (which dials more
+	// underlays) or constraints (which desire more). This mirrors the "simple channel"
+	// definition used elsewhere (no constraints and no dial policy). A simple single-underlay
+	// channel never dials or accepts additional underlays, so it needs no secret. Headers()
+	// may be nil, which indexes safely to a nil slice.
+	impl.groupSecret = config.Underlay.Headers()[GroupSecretHeader]
+	if len(impl.groupSecret) == 0 && (config.DialPolicy != nil || len(config.Constraints) > 0) {
+		return nil, errors.New("no group secret header found for multi-underlay channel")
 	}
-	impl.groupSecret = groupSecret
 
 	// Register the channel as an underlay event listener for constraint enforcement
 	impl.underlays.AddListener(impl)
@@ -293,12 +297,6 @@ func NewSingleChannel(logicalName string, underlayFactory UnderlayFactory, bindH
 // NewSingleChannelWithUnderlay creates a simple channel from an existing underlay, with a single
 // sender and bind handler. Use this when you already have a connected underlay (e.g. from a listener).
 func NewSingleChannelWithUnderlay(logicalName string, underlay Underlay, bindHandler BindHandler, options *Options) (Channel, error) {
-	headers := underlay.Headers()
-	if len(headers[GroupSecretHeader]) == 0 {
-		secret := uuid.New()
-		headers[GroupSecretHeader] = secret[:]
-	}
-
 	outQueueSize := DefaultOutQueueSize
 	if options != nil {
 		outQueueSize = options.OutQueueSize
