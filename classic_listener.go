@@ -36,7 +36,7 @@ type classicListener struct {
 	socket          io.Closer
 	close           chan struct{}
 	handlers        []ConnectionHandler
-	acceptF         func(underlay Underlay)
+	acceptor        HelloAcceptor
 	created         chan Underlay
 	connectOptions  ConnectOptions
 	tcfg            transport.Configuration
@@ -105,7 +105,7 @@ func newClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 		socket:          nil,
 		close:           closeNotify,
 		handlers:        config.ConnectionHandlers,
-		acceptF:         nil,
+		acceptor:        nil,
 		created:         nil,
 		connectOptions:  config.ConnectOptions,
 		tcfg:            config.TransportConfig,
@@ -119,9 +119,17 @@ func newClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 }
 
 // NewClassicListenerF creates a classic listener that calls f for each accepted underlay.
+// f is invoked after the hello is acknowledged; use NewClassicListenerWithAcceptor for an
+// acceptor that needs to record state before the acknowledgement.
 func NewClassicListenerF(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig, f func(underlay Underlay)) (io.Closer, error) {
+	return NewClassicListenerWithAcceptor(identity, endpoint, config, HelloAcceptorF(f))
+}
+
+// NewClassicListenerWithAcceptor creates a classic listener that hands each accepted
+// underlay to the given HelloAcceptor, which controls when the hello is acknowledged.
+func NewClassicListenerWithAcceptor(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig, acceptor HelloAcceptor) (io.Closer, error) {
 	listener := newClassicListener(identity, endpoint, config)
-	listener.acceptF = f
+	listener.acceptor = acceptor
 	if err := listener.Listen(); err != nil {
 		return nil, err
 	}
@@ -132,14 +140,14 @@ func NewClassicListenerF(identity *identity.TokenId, endpoint transport.Address,
 func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, config ListenerConfig) UnderlayListener {
 	listener := newClassicListener(identity, endpoint, config)
 	listener.created = make(chan Underlay)
-	listener.acceptF = func(underlay Underlay) {
+	listener.acceptor = HelloAcceptorF(func(underlay Underlay) {
 		select {
 		case listener.created <- underlay:
 		case <-listener.close:
 			pfxlog.Logger().WithField("underlay", underlay.Label()).Info("channel closed, can't notify of new connection")
 			return
 		}
-	}
+	})
 	return listener
 }
 
@@ -238,12 +246,12 @@ func (self *classicListener) acceptConnection(peer transport.Conn) {
 
 		impl.init(hello.IdToken, connectionId, hello.Headers)
 
-		if err = self.ackHello(impl, request, true, ""); err == nil {
-			self.acceptF(impl)
-		} else {
-			log.Errorf("error acknowledging hello for [%s] (%v)", peer.Detail().Address, err)
-			_ = peer.Close()
-		}
+		// Hand the underlay to the acceptor, which decides when to acknowledge the hello.
+		// Deferring the ack lets the acceptor record state (e.g. register a group) before
+		// the peer is released to dial additional underlays.
+		self.acceptor.AcceptUnderlay(impl, func() error {
+			return self.ackHello(impl, request, true, "")
+		})
 	})
 	if err != nil {
 		log.WithError(err).Error("failed to queue connection accept")

@@ -37,9 +37,41 @@ func Test64BitAlignment(t *testing.T) {
 	hb := heartbeater{}
 	chImpl := channelImpl{}
 
-	atomic.LoadInt64(&hb.lastHeartbeatTx)
-	atomic.LoadInt64(&hb.unrespondedHeartbeat)
+	hb.lastHeartbeatTx.Load()
+	hb.unrespondedHeartbeat.Load()
 	atomic.LoadInt64(&chImpl.lastRead)
+}
+
+func Test_UpdateIntervals(t *testing.T) {
+	req := require.New(t)
+
+	hb := &heartbeater{reconfigC: make(chan time.Duration, 1)}
+	hb.heartBeatIntervalNs.Store((10 * time.Second).Nanoseconds())
+
+	hb.UpdateIntervals(2*time.Second, 250*time.Millisecond)
+
+	// send interval is applied immediately, on the field the Tx path reads
+	req.Equal((2 * time.Second).Nanoseconds(), hb.heartBeatIntervalNs.Load())
+
+	// check interval is handed to the pulse goroutine via reconfigC
+	select {
+	case got := <-hb.reconfigC:
+		req.Equal(250*time.Millisecond, got)
+	default:
+		req.Fail("expected a check interval to be queued on reconfigC")
+	}
+
+	// a second update with reconfigC already full coalesces to the latest
+	// value rather than blocking
+	hb.UpdateIntervals(3*time.Second, 100*time.Millisecond)
+	hb.UpdateIntervals(4*time.Second, 50*time.Millisecond)
+	req.Equal((4 * time.Second).Nanoseconds(), hb.heartBeatIntervalNs.Load())
+	select {
+	case got := <-hb.reconfigC:
+		req.Equal(50*time.Millisecond, got, "latest check interval should win")
+	default:
+		req.Fail("expected the coalesced check interval to be queued")
+	}
 }
 
 func TestBaselineHeartbeat(t *testing.T) {
