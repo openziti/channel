@@ -6,8 +6,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/michaelquigley/pfxlog v0.6.10
-	github.com/openziti/foundation/v2 v2.0.94
-	github.com/openziti/identity v1.0.132
+	github.com/openziti/foundation/v2 v2.0.95
+	github.com/openziti/identity v1.0.133
 	github.com/openziti/transport/v2 v2.0.216
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.4
@@ -27,7 +27,7 @@ require (
 	github.com/speps/go-hashids v2.0.0+incompatible // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/term v0.43.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/term v0.44.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
