@@ -17,6 +17,7 @@
 package channel
 
 import (
+	"io"
 	"log/slog"
 	"testing"
 
@@ -30,8 +31,11 @@ func TestEventLoggerResolution(t *testing.T) {
 	origLoggerFor := LoggerFor
 	defer func() { LoggerFor = origLoggerFor }()
 
-	optLogger := slog.New(slog.NewTextHandler(nil, nil))
-	globalLogger := slog.New(slog.NewTextHandler(nil, nil))
+	// Use io.Discard, not a nil writer: this test installs a logger into the
+	// package-global LoggerFor, which background channel-teardown goroutines
+	// from other tests may invoke. A nil-writer handler would panic when used.
+	optLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	globalLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	t.Run("Options.Logger wins over LoggerFor", func(t *testing.T) {
 		LoggerFor = func(string) *slog.Logger { return globalLogger }
