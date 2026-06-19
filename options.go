@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"io"
+	"log/slog"
 	"time"
 )
 
@@ -46,6 +47,14 @@ type Options struct {
 	ConnectOptions
 	WriteTimeout    time.Duration
 	MessageStrategy MessageStrategy
+
+	// Logger, when set, is the slog.Logger this channel uses for its lifecycle
+	// events. It takes precedence over the package-level LoggerFor, letting an
+	// owner give each channel (or channel type) its own logger and level
+	// control - e.g. an SDK context injecting its logger, or a router naming
+	// its link vs ctrl channels distinctly. When nil, the channel falls back
+	// to LoggerFor and then to the pfxlog default.
+	Logger *slog.Logger `json:"-"`
 }
 
 // DefaultOptions returns Options with sensible defaults.

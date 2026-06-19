@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"slices"
 	"sync"
@@ -663,13 +664,23 @@ func (self *channelImpl) rxer(underlay Underlay, notifier *CloseNotifier) {
 	}
 }
 
+// eventLogger returns the slog.Logger this channel uses for lifecycle events:
+// the per-channel Options.Logger when set, otherwise the package-level
+// LoggerFor / pfxlog default keyed by the channel's logical name.
+func (self *channelImpl) eventLogger() *slog.Logger {
+	if self.options != nil && self.options.Logger != nil {
+		return self.options.Logger
+	}
+	return channelLogger(self.logicalName)
+}
+
 // UnderlayAdded implements UnderlayEventListener. Logs the event.
 func (self *channelImpl) UnderlayAdded(ch Channel, underlay Underlay) {
-	pfxlog.Logger().
-		WithField("id", ch.Label()).
-		WithField("underlays", ch.GetUnderlayCountsByType()).
-		WithField("underlayType", GetUnderlayType(underlay)).
-		Info("underlay added")
+	self.eventLogger().Info("underlay added",
+		"id", ch.Label(),
+		"underlays", ch.GetUnderlayCountsByType(),
+		"underlayType", GetUnderlayType(underlay),
+	)
 }
 
 // UnderlayRemoved implements UnderlayEventListener. Reports the underlay's lifetime to the
@@ -677,12 +688,12 @@ func (self *channelImpl) UnderlayAdded(ch Channel, underlay Underlay) {
 func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay) {
 	lifetime := time.Since(underlay.CreatedAt())
 
-	pfxlog.Logger().
-		WithField("id", ch.Label()).
-		WithField("underlays", ch.GetUnderlayCountsByType()).
-		WithField("underlayType", GetUnderlayType(underlay)).
-		WithField("lifetime", lifetime).
-		Info("underlay removed")
+	self.eventLogger().Info("underlay removed",
+		"id", ch.Label(),
+		"underlays", ch.GetUnderlayCountsByType(),
+		"underlayType", GetUnderlayType(underlay),
+		"lifetime", lifetime,
+	)
 
 	if self.dialPolicy != nil {
 		self.dialPolicy.UnderlayClosed(self.getValidatedUnderlayType(underlay), lifetime)
