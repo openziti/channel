@@ -37,9 +37,15 @@ func (b *blockingUnderlay) Rx() (*Message, error) {
 	return nil, io.EOF
 }
 
+// Close is idempotent and safe to call concurrently. The channel closes its underlay from
+// both Channel.Close and the rx goroutine's deferred cleanup, so without the guard the two
+// races on the embedded testUnderlay's unsynchronized closed flag.
 func (b *blockingUnderlay) Close() error {
-	b.once.Do(func() { close(b.closeCh) })
-	return b.testUnderlay.Close()
+	b.once.Do(func() {
+		close(b.closeCh)
+		_ = b.testUnderlay.Close()
+	})
+	return nil
 }
 
 // TestNewSingleChannelWithoutGroupSecret verifies that a simple single-underlay channel can
@@ -82,4 +88,35 @@ func TestNewChannelMultiUnderlayRequiresGroupSecret(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, ch)
 	require.Contains(t, err.Error(), "no group secret")
+}
+
+// TestSimpleChannelRejectsAdditionalUnderlays verifies that a simple channel (no
+// dial policy, no constraints) refuses additional underlays via AcceptUnderlay,
+// including a secretless one. Without the capability guard, a secretless simple
+// channel's empty groupSecret would bytes.Equal-match another secretless underlay
+// and wrongly admit it.
+func TestSimpleChannelRejectsAdditionalUnderlays(t *testing.T) {
+	underlay := &blockingUnderlay{testUnderlay: &testUnderlay{headers: nil}, closeCh: make(chan struct{})}
+	ch, err := NewSingleChannelWithUnderlay("test", underlay, BindHandlerF(func(Binding) error { return nil }), nil)
+	require.NoError(t, err)
+	require.Empty(t, ch.(*channelImpl).groupSecret)
+	t.Cleanup(func() { _ = ch.Close() })
+
+	impl := ch.(*channelImpl)
+
+	t.Run("secretless underlay rejected and closed", func(t *testing.T) {
+		extra := &testUnderlay{headers: nil}
+		err := impl.AcceptUnderlay(extra)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not accept additional underlays")
+		require.True(t, extra.IsClosed(), "rejected underlay should be closed")
+	})
+
+	t.Run("secret-bearing underlay rejected and closed", func(t *testing.T) {
+		extra := &testUnderlay{headers: map[int32][]byte{GroupSecretHeader: []byte("mysecret")}}
+		err := impl.AcceptUnderlay(extra)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not accept additional underlays")
+		require.True(t, extra.IsClosed(), "rejected underlay should be closed")
+	})
 }

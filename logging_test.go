@@ -25,44 +25,35 @@ import (
 )
 
 // TestEventLoggerResolution verifies the lifecycle-logger precedence:
-// Options.Logger first, then the package-level LoggerFor, then a non-nil
-// default.
+// Options.Logger first, then the installed LoggerFor resolver, then a non-nil
+// default. It exercises the pure resolver with injected funcs rather than
+// mutating package state, so it never races background channel goroutines.
 func TestEventLoggerResolution(t *testing.T) {
-	origLoggerFor := LoggerFor
-	defer func() { LoggerFor = origLoggerFor }()
-
-	// Use io.Discard, not a nil writer: this test installs a logger into the
-	// package-global LoggerFor, which background channel-teardown goroutines
-	// from other tests may invoke. A nil-writer handler would panic when used.
 	optLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	globalLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	loggerFor := func(string) *slog.Logger { return globalLogger }
 
 	t.Run("Options.Logger wins over LoggerFor", func(t *testing.T) {
-		LoggerFor = func(string) *slog.Logger { return globalLogger }
-		ch := &channelImpl{logicalName: "link", options: &Options{Logger: optLogger}}
-		assert.Same(t, optLogger, ch.eventLogger())
+		got := resolveEventLogger(&Options{Logger: optLogger}, "link", loggerFor)
+		assert.Same(t, optLogger, got)
 	})
 
 	t.Run("LoggerFor used when Options.Logger nil", func(t *testing.T) {
 		var gotName string
-		LoggerFor = func(name string) *slog.Logger {
+		named := func(name string) *slog.Logger {
 			gotName = name
 			return globalLogger
 		}
-		ch := &channelImpl{logicalName: "ctrl", options: &Options{}}
-		assert.Same(t, globalLogger, ch.eventLogger())
+		got := resolveEventLogger(&Options{}, "ctrl", named)
+		assert.Same(t, globalLogger, got)
 		assert.Equal(t, "ctrl", gotName, "LoggerFor should be keyed by the channel's logical name")
 	})
 
 	t.Run("default used when neither set", func(t *testing.T) {
-		LoggerFor = nil
-		ch := &channelImpl{logicalName: "agent", options: &Options{}}
-		assert.NotNil(t, ch.eventLogger())
+		assert.NotNil(t, resolveEventLogger(&Options{}, "agent", nil))
 	})
 
 	t.Run("nil options falls back to LoggerFor", func(t *testing.T) {
-		LoggerFor = func(string) *slog.Logger { return globalLogger }
-		ch := &channelImpl{logicalName: "agent"}
-		assert.Same(t, globalLogger, ch.eventLogger())
+		assert.Same(t, globalLogger, resolveEventLogger(nil, "agent", loggerFor))
 	})
 }

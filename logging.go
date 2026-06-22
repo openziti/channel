@@ -25,29 +25,44 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// LoggerFor when set, returns the *slog.Logger that channel uses for events
-// scoped to the given name. The name is the channel's LogicalName (e.g.
-// "ctrl", "link", "agent"), so an embedding application can both route
-// channel logging through its own slog setup and control verbosity per
-// channel type independently of the global level.
-//
-// When nil, channel falls back to a default logger that forwards to
-// pfxlog/logrus, preserving the logging behavior channel had before this seam
-// existed. Applications that wire LoggerFor get accurate source attribution
-// from slog's own caller capture; the pfxlog fallback attributes the call to
-// the forwarding handler, which is a minor cosmetic difference on these
-// events.
-//
-// Set this once during startup before any channels are created.
-var LoggerFor func(name string) *slog.Logger
+var (
+	loggerForMu sync.Mutex
+	loggerFor   func(name string) *slog.Logger
+)
 
-// channelLogger returns the logger for the given logical name, using LoggerFor
-// when set and the pfxlog-backed default otherwise. Callers that have a
-// per-channel Options.Logger should prefer (*channelImpl).eventLogger, which
-// consults it first.
-func channelLogger(name string) *slog.Logger {
-	if f := LoggerFor; f != nil {
-		return f(name)
+// SetLoggerFor installs the resolver that channel uses for events scoped to a
+// channel's LogicalName (e.g. "ctrl", "link", "agent"), letting an embedding
+// application route channel logging through its own slog setup and control
+// verbosity per channel type. When no resolver is installed, channel falls back
+// to a default logger that forwards to pfxlog/logrus, preserving the logging
+// behavior channel had before this seam existed.
+//
+// Set this once during startup, before any channels are created. Each channel
+// resolves and caches its logger at creation, so installing a resolver after
+// channels already exist applies only to channels created afterward.
+func SetLoggerFor(f func(name string) *slog.Logger) {
+	loggerForMu.Lock()
+	defer loggerForMu.Unlock()
+	loggerFor = f
+}
+
+// getLoggerFor returns the installed resolver, or nil if none has been set.
+func getLoggerFor() func(name string) *slog.Logger {
+	loggerForMu.Lock()
+	defer loggerForMu.Unlock()
+	return loggerFor
+}
+
+// resolveEventLogger picks the logger for a channel event by precedence: the
+// per-channel Options.Logger, then the supplied loggerFor resolver keyed by name,
+// then the pfxlog-backed default. Taking loggerFor as a parameter keeps the
+// precedence logic free of package state so it can be exercised directly.
+func resolveEventLogger(opts *Options, name string, loggerFor func(name string) *slog.Logger) *slog.Logger {
+	if opts != nil && opts.Logger != nil {
+		return opts.Logger
+	}
+	if loggerFor != nil {
+		return loggerFor(name)
 	}
 	return defaultChannelLogger(name)
 }

@@ -193,6 +193,11 @@ type channelImpl struct {
 	validUnderlayTypes    []string
 	applyInProgress       atomic.Bool
 
+	// eventLog is the slog.Logger used for this channel's lifecycle events. It
+	// is resolved once at creation so per-event logging needs no synchronization
+	// or package-global access.
+	eventLog *slog.Logger
+
 	lock      sync.Mutex
 	underlays *Underlays
 }
@@ -262,6 +267,12 @@ func NewChannel(config *Config) (Channel, error) {
 		}
 		return nil, err
 	}
+
+	// Resolve this channel's event logger once, now that creation has succeeded
+	// and just before the first underlay is added. Caching it here keeps
+	// per-event logging free of locks and package-global access; the underlay
+	// events below read impl.eventLog.
+	impl.eventLog = resolveEventLogger(impl.options, impl.logicalName, getLoggerFor())
 
 	// Add and start the first underlay (this triggers UnderlayAdded)
 	impl.underlays.Add(impl, config.Underlay)
@@ -344,9 +355,28 @@ type singleSenders struct {
 func (self *singleSenders) GetDefaultSender() Sender             { return self.sender }
 func (self *singleSenders) HandleTxFailed(string, Sendable) bool { return false }
 
+// isMultiUnderlayCapable reports whether this channel can grow beyond its
+// initial underlay. Only channels with a dial policy (which dials more
+// underlays) or constraints (which require or desire specific underlays) accept
+// or dial additional underlays; a simple channel never does.
+func (self *channelImpl) isMultiUnderlayCapable() bool {
+	return self.dialPolicy != nil || len(self.constraints) > 0
+}
+
 func (self *channelImpl) AcceptUnderlay(underlay Underlay) error {
 	self.lock.Lock()
 	defer self.lock.Unlock()
+
+	// A simple channel never accepts additional underlays. Reject before the
+	// secret check: a secretless simple channel has an empty groupSecret, and
+	// bytes.Equal of two empty secrets would otherwise admit another secretless
+	// underlay.
+	if !self.isMultiUnderlayCapable() {
+		if err := underlay.Close(); err != nil {
+			pfxlog.ContextLogger(self.Label()).WithError(err).Error("error closing underlay")
+		}
+		return fmt.Errorf("new underlay for '%s' not accepted: channel does not accept additional underlays", self.ConnectionId())
+	}
 
 	groupSecret := underlay.Headers()[GroupSecretHeader]
 	if !bytes.Equal(groupSecret, self.groupSecret) {
@@ -664,19 +694,9 @@ func (self *channelImpl) rxer(underlay Underlay, notifier *CloseNotifier) {
 	}
 }
 
-// eventLogger returns the slog.Logger this channel uses for lifecycle events:
-// the per-channel Options.Logger when set, otherwise the package-level
-// LoggerFor / pfxlog default keyed by the channel's logical name.
-func (self *channelImpl) eventLogger() *slog.Logger {
-	if self.options != nil && self.options.Logger != nil {
-		return self.options.Logger
-	}
-	return channelLogger(self.logicalName)
-}
-
 // UnderlayAdded implements UnderlayEventListener. Logs the event.
 func (self *channelImpl) UnderlayAdded(ch Channel, underlay Underlay) {
-	self.eventLogger().Info("underlay added",
+	self.eventLog.Info("underlay added",
 		"id", ch.Label(),
 		"underlays", ch.GetUnderlayCountsByType(),
 		"underlayType", GetUnderlayType(underlay),
@@ -688,7 +708,7 @@ func (self *channelImpl) UnderlayAdded(ch Channel, underlay Underlay) {
 func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay) {
 	lifetime := time.Since(underlay.CreatedAt())
 
-	self.eventLogger().Info("underlay removed",
+	self.eventLog.Info("underlay removed",
 		"id", ch.Label(),
 		"underlays", ch.GetUnderlayCountsByType(),
 		"underlayType", GetUnderlayType(underlay),
@@ -699,9 +719,9 @@ func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay) {
 		self.dialPolicy.UnderlayClosed(self.getValidatedUnderlayType(underlay), lifetime)
 	}
 
-	if len(self.constraints) == 0 && self.dialPolicy == nil {
-		// No constraints or dial policy means this is a simple channel that cannot
-		// recover from underlay loss. If no underlays remain, close the channel.
+	if !self.isMultiUnderlayCapable() {
+		// A simple channel (no constraints, no dial policy) cannot recover from
+		// underlay loss. If no underlays remain, close the channel.
 		if len(self.underlays.GetAll()) == 0 {
 			if err := self.Close(); err != nil {
 				pfxlog.Logger().WithError(err).Error("error closing channel after last underlay removed")
