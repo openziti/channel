@@ -55,14 +55,19 @@ func getLoggerFor() func(name string) *slog.Logger {
 
 // resolveEventLogger picks the logger for a channel event by precedence: the
 // per-channel Options.Logger, then the supplied loggerFor resolver keyed by name,
-// then the pfxlog-backed default. Taking loggerFor as a parameter keeps the
-// precedence logic free of package state so it can be exercised directly.
+// then the pfxlog-backed default. It always returns a non-nil logger: a resolver
+// that returns nil for a name falls through to the default, so the channel never
+// caches a nil logger and panics on its first event. Taking loggerFor as a
+// parameter keeps the precedence logic free of package state so it can be
+// exercised directly.
 func resolveEventLogger(opts *Options, name string, loggerFor func(name string) *slog.Logger) *slog.Logger {
 	if opts != nil && opts.Logger != nil {
 		return opts.Logger
 	}
 	if loggerFor != nil {
-		return loggerFor(name)
+		if logger := loggerFor(name); logger != nil {
+			return logger
+		}
 	}
 	return defaultChannelLogger(name)
 }

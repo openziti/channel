@@ -238,6 +238,12 @@ func NewChannel(config *Config) (Channel, error) {
 	impl.ownerId = config.Underlay.Id()
 	impl.fallbackUnderlay.Store(&config.Underlay)
 
+	// Resolve this channel's event logger before registering listeners or binding:
+	// a bind handler can reach the channel via Binding.GetChannel() and call
+	// AcceptUnderlay, which fires UnderlayAdded and reads impl.eventLog. Caching it
+	// here keeps per-event logging free of locks and package-global access.
+	impl.eventLog = resolveEventLogger(impl.options, impl.logicalName, getLoggerFor())
+
 	// The group secret matches reconnecting or additional underlays to this channel, so it is
 	// only required for channels that can grow: those with a dial policy (which dials more
 	// underlays) or constraints (which desire more). This mirrors the "simple channel"
@@ -267,12 +273,6 @@ func NewChannel(config *Config) (Channel, error) {
 		}
 		return nil, err
 	}
-
-	// Resolve this channel's event logger once, now that creation has succeeded
-	// and just before the first underlay is added. Caching it here keeps
-	// per-event logging free of locks and package-global access; the underlay
-	// events below read impl.eventLog.
-	impl.eventLog = resolveEventLogger(impl.options, impl.logicalName, getLoggerFor())
 
 	// Add and start the first underlay (this triggers UnderlayAdded)
 	impl.underlays.Add(impl, config.Underlay)

@@ -56,4 +56,10 @@ func TestEventLoggerResolution(t *testing.T) {
 	t.Run("nil options falls back to LoggerFor", func(t *testing.T) {
 		assert.Same(t, globalLogger, resolveEventLogger(nil, "agent", loggerFor))
 	})
+
+	t.Run("resolver returning nil falls back to default", func(t *testing.T) {
+		nilResolver := func(string) *slog.Logger { return nil }
+		assert.NotNil(t, resolveEventLogger(&Options{}, "agent", nilResolver),
+			"a resolver returning nil must not be cached; fall back to the default")
+	})
 }
