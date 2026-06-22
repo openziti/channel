@@ -90,6 +90,30 @@ func TestNewChannelMultiUnderlayRequiresGroupSecret(t *testing.T) {
 	require.Contains(t, err.Error(), "no group secret")
 }
 
+// TestNewChannelMinTotalUnderlaysRequiresGroupSecret verifies that MinTotalUnderlays alone makes
+// a channel multi-underlay-capable and so requires a group secret, matching isMultiUnderlayCapable.
+// Without the secret, the channel would admit any secretless underlay, since bytes.Equal of two
+// empty secrets is true.
+func TestNewChannelMinTotalUnderlaysRequiresGroupSecret(t *testing.T) {
+	ctx := NewSenderContext()
+	senders := &singleSenders{SenderContext: ctx, sender: NewSingleChSender(ctx, make(chan Sendable, 1))}
+	msgSource := NewSimpleMessageSourceProvider(func(*CloseNotifier) (Sendable, error) { return nil, io.EOF })
+
+	config := &Config{
+		LogicalName:           "test",
+		Underlay:              &testUnderlay{headers: nil},
+		Binder:                MakeBinder(BindHandlerF(func(Binding) error { return nil })),
+		Senders:               senders,
+		MessageSourceProvider: msgSource,
+		MinTotalUnderlays:     2,
+	}
+
+	ch, err := NewChannel(config)
+	require.Error(t, err)
+	require.Nil(t, ch)
+	require.Contains(t, err.Error(), "no group secret")
+}
+
 // TestSimpleChannelRejectsAdditionalUnderlays verifies that a simple channel (no
 // dial policy, no constraints) refuses additional underlays via AcceptUnderlay,
 // including a secretless one. Without the capability guard, a secretless simple
