@@ -69,7 +69,13 @@ type Config struct {
 	MessageSourceProvider MessageSourceProvider
 	DialPolicy            DialPolicy
 	Constraints           map[string]UnderlayConstraint
-	MinTotalUnderlays     int
+
+	// MinTotalUnderlays is the minimum number of underlays (across all types) the channel
+	// must keep open; it closes when the total drops below this. A positive value also makes
+	// the channel multi-underlay-capable, so it can be used on its own (without per-type
+	// constraints or a dial policy) for a channel that accepts additional underlays and
+	// closes only when its last one is lost.
+	MinTotalUnderlays int
 
 	// ConstraintStartupDelay delays the first constraint check after channel creation.
 	// Useful when the initial underlay needs time to stabilize before additional
@@ -356,11 +362,12 @@ func (self *singleSenders) GetDefaultSender() Sender             { return self.s
 func (self *singleSenders) HandleTxFailed(string, Sendable) bool { return false }
 
 // isMultiUnderlayCapable reports whether this channel can grow beyond its
-// initial underlay. Only channels with a dial policy (which dials more
-// underlays) or constraints (which require or desire specific underlays) accept
-// or dial additional underlays; a simple channel never does.
+// initial underlay. Channels with a dial policy (which dials more underlays),
+// constraints (which require or desire specific underlay types), or a minimum
+// total underlay count accept or dial additional underlays; a simple channel
+// with none of these never does.
 func (self *channelImpl) isMultiUnderlayCapable() bool {
-	return self.dialPolicy != nil || len(self.constraints) > 0
+	return self.dialPolicy != nil || len(self.constraints) > 0 || self.minTotalUnderlays > 0
 }
 
 func (self *channelImpl) AcceptUnderlay(underlay Underlay) error {
@@ -734,7 +741,10 @@ func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay) {
 }
 
 func (self *channelImpl) applyConstraints() {
-	if len(self.constraints) == 0 {
+	// Nothing to enforce without per-type constraints or a minimum total. A channel
+	// with only minTotalUnderlays still needs this: countsShowValidState closes it
+	// when the total drops below the minimum.
+	if len(self.constraints) == 0 && self.minTotalUnderlays == 0 {
 		return
 	}
 
