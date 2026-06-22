@@ -17,22 +17,61 @@
 package channel
 
 import (
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"maps"
+	"time"
+
 	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
-	"time"
 )
 
+// HelloHeaderProvider adjusts the hello headers based on the peer's certificates. It is
+// invoked after the transport connection is established (so the peer's certificates are
+// available) but before the hello is sent, letting a dialer set hello headers that depend on
+// the peer's verified identity. headers contains the headers already set on the hello
+// (statically-configured and per-dial); the provider may add, modify or remove entries
+// directly. Entries should be replaced rather than having their value slices edited in place,
+// as values may be shared with the dialer's configuration. Returning an error aborts the dial,
+// and that error is treated as non-retryable: the dialer does not open another connection to
+// retry, since a provider that returns an error has made a deliberate decision about this
+// specific peer.
+type HelloHeaderProvider func(peerCertificates []*x509.Certificate, headers map[int32][]byte) error
+
+// NonRetryableError marks an error as a deliberate, final dial failure that the dialer must not
+// retry internally (in contrast to a protocol-version negotiation error, which is retried).
+type NonRetryableError struct {
+	err error
+}
+
+func (self *NonRetryableError) Error() string {
+	if self.err == nil {
+		return "non-retryable dial failure"
+	}
+	return self.err.Error()
+}
+
+func (self *NonRetryableError) Unwrap() error {
+	return self.err
+}
+
+// IsNonRetryable reports whether err (or any error it wraps) is a NonRetryableError.
+func IsNonRetryable(err error) bool {
+	var nonRetryable *NonRetryableError
+	return errors.As(err, &nonRetryable)
+}
+
 type classicDialer struct {
-	identity        *identity.TokenId
-	endpoint        transport.Address
-	localBinding    string
-	headers         map[int32][]byte
-	underlayFactory func(messageStrategy MessageStrategy, peer transport.Conn, version uint32) classicUnderlay
-	messageStrategy MessageStrategy
-	transportConfig transport.Configuration
+	identity            *identity.TokenId
+	endpoint            transport.Address
+	localBinding        string
+	headers             map[int32][]byte
+	underlayFactory     func(messageStrategy MessageStrategy, peer transport.Conn, version uint32) classicUnderlay
+	messageStrategy     MessageStrategy
+	transportConfig     transport.Configuration
+	helloHeaderProvider HelloHeaderProvider
 }
 
 // DialerConfig holds configuration for creating a classic dialer.
@@ -43,17 +82,21 @@ type DialerConfig struct {
 	Headers         map[int32][]byte
 	MessageStrategy MessageStrategy
 	TransportConfig transport.Configuration
+	// HelloHeaderProvider, if set, is invoked after the transport connection is established and
+	// before the hello is sent, to compute additional hello headers from the peer's certificates.
+	HelloHeaderProvider HelloHeaderProvider
 }
 
 // NewClassicDialer creates a DialUnderlayFactory that dials using the classic transport protocol.
 func NewClassicDialer(cfg DialerConfig) DialUnderlayFactory {
 	result := &classicDialer{
-		identity:        cfg.Identity,
-		endpoint:        cfg.Endpoint,
-		localBinding:    cfg.LocalBinding,
-		headers:         cfg.Headers,
-		messageStrategy: cfg.MessageStrategy,
-		transportConfig: cfg.TransportConfig,
+		identity:            cfg.Identity,
+		endpoint:            cfg.Endpoint,
+		localBinding:        cfg.LocalBinding,
+		headers:             cfg.Headers,
+		messageStrategy:     cfg.MessageStrategy,
+		transportConfig:     cfg.TransportConfig,
+		helloHeaderProvider: cfg.HelloHeaderProvider,
 	}
 
 	if cfg.Endpoint.Type() == "dtls" {
@@ -92,7 +135,7 @@ func (self *classicDialer) CreateWithHeaders(timeout time.Duration, headers map[
 
 		underlay := self.underlayFactory(self.messageStrategy, peer, version)
 		if err = self.sendHello(underlay, deadline, headers); err != nil {
-			if tryCount > 0 {
+			if tryCount > 0 || IsNonRetryable(err) {
 				return nil, err
 			} else {
 				log.WithError(err).Warnf("error initiating channel with hello")
@@ -134,9 +177,18 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 	}()
 
 	request := NewHello(self.identity.Token, self.headers)
-	for k, v := range headers {
-		request.Headers[k] = v
+	maps.Copy(request.Headers, headers)
+
+	// Let the caller adjust the hello headers based on the peer's (now-available)
+	// certificates, e.g. to set headers that depend on the verified identity of the
+	// peer we reached. The provider mutates the hello's headers directly.
+	if self.helloHeaderProvider != nil {
+		if err := self.helloHeaderProvider(peer.PeerCertificates(), request.Headers); err != nil {
+			_ = underlay.Close()
+			return &NonRetryableError{err: err}
+		}
 	}
+
 	request.SetSequence(HelloSequence)
 	if err = underlay.Tx(request); err != nil {
 		return err
@@ -158,7 +210,10 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 		return errors.New(result.Message)
 	}
 
-	connectionId := string(headers[ConnectionIdHeader])
+	// Use request.Headers (which includes any headers contributed by the HelloHeaderProvider)
+	// rather than the pre-provider headers argument, so a provider-set ConnectionId drives the
+	// local underlay's grouping as well as the outbound hello.
+	connectionId := string(request.Headers[ConnectionIdHeader])
 	if connectionId == "" {
 		connectionId = string(response.Headers[ConnectionIdHeader])
 	}
@@ -170,9 +225,10 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 		id = certs[0].Subject.CommonName
 	}
 
-	// type should always be controller by the dialing side, the listener shouldn't be setting a type
-	// in the header. Set the type here, so we can know the type on the dialing side as well
-	response.Headers[TypeHeader] = headers[TypeHeader]
+	// the type is set by the dialing side, not the listener. Use request.Headers (which includes any
+	// headers contributed by the HelloHeaderProvider) rather than the pre-provider headers argument,
+	// so a provider-set type drives the local underlay as well as the outbound hello.
+	response.Headers[TypeHeader] = request.Headers[TypeHeader]
 	underlay.init(id, connectionId, response.Headers)
 
 	return nil
