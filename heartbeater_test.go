@@ -96,15 +96,23 @@ func TestBaselineHeartbeat(t *testing.T) {
 				remoteDone <- count
 			}()
 
-			for !ch.IsClosed() && !done.Load() {
+			// Loop until the test's time budget elapses, not until the channel closes: a
+			// premature close should surface as a send error reported on errC rather than a
+			// clean exit that the test ignores.
+			for !done.Load() {
 				msg := NewMessage(ContentTypePingType, []byte("hello"))
 				if err := msg.WithTimeout(time.Second).Send(ch); err != nil {
-					if !ch.IsClosed() {
+					if !done.Load() {
 						errC <- err
 					}
 					return
 				}
 				count++
+				// Pace the loop so it doesn't spin flat-out. Unbounded sending pegs the CPU
+				// and starves the tx/rx goroutines, which on a loaded CI runner lets the send
+				// queue back up past the enqueue timeout, an expected backpressure condition
+				// this test isn't meant to provoke. Matches TestBusyHeartbeat.
+				time.Sleep(time.Millisecond)
 			}
 		}()
 	}
@@ -127,14 +135,20 @@ func TestBaselineHeartbeat(t *testing.T) {
 	defer func() { _ = ch.Close() }()
 
 	var count uint64
-	for !ch.IsClosed() && !done.Load() {
+	// Loop until the time budget elapses. A healthy channel stays open the whole time (it is
+	// only closed by the deferred Close after this loop), so any send error here is a real
+	// failure, asserted unconditionally rather than skipped once the channel has closed.
+	for !done.Load() {
 		msg := NewMessage(ContentTypePingType, []byte("hello"))
-		err := msg.WithTimeout(time.Second).Send(ch)
-		if !ch.IsClosed() {
-			req.NoError(err)
-		}
+		req.NoError(msg.WithTimeout(time.Second).Send(ch))
 		count++
+		// See the matching note on the server loop above: pace sends so the queue doesn't
+		// saturate under CI load and trip the enqueue timeout.
+		time.Sleep(time.Millisecond)
 	}
+	// Guard against a vacuous pass: the channel must have survived the full duration rather
+	// than closing early and skipping the assertions above.
+	req.False(ch.IsClosed(), "channel closed before the test duration elapsed")
 
 	var remoteCount uint64
 	select {
