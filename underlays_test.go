@@ -167,8 +167,10 @@ type testUnderlayListener struct {
 	removed []Underlay
 }
 
-func (l *testUnderlayListener) UnderlayAdded(_ Channel, u Underlay)   { l.added = append(l.added, u) }
-func (l *testUnderlayListener) UnderlayRemoved(_ Channel, u Underlay) { l.removed = append(l.removed, u) }
+func (l *testUnderlayListener) UnderlayAdded(_ Channel, u Underlay) { l.added = append(l.added, u) }
+func (l *testUnderlayListener) UnderlayRemoved(_ Channel, u Underlay) {
+	l.removed = append(l.removed, u)
+}
 
 type testUnderlayListenerF struct {
 	onAdded   func(Channel, Underlay)
@@ -210,4 +212,34 @@ func Test_applyConstraints_ClosesBelowMinEvenWhenApplyInProgress(t *testing.T) {
 	impl.applyConstraints()
 
 	require.True(t, impl.IsClosed(), "channel below min must close even while applyInProgress is held")
+}
+
+// Test_isMultiUnderlayCapable_MinTotalUnderlays verifies MinTotalUnderlays alone marks a
+// channel multi-underlay-capable, so a channel can accept additional underlays without
+// per-type constraints or a dial policy.
+func Test_isMultiUnderlayCapable_MinTotalUnderlays(t *testing.T) {
+	require.True(t, (&channelImpl{minTotalUnderlays: 1}).isMultiUnderlayCapable(),
+		"minTotalUnderlays > 0 should be multi-underlay-capable")
+	require.False(t, (&channelImpl{}).isMultiUnderlayCapable(),
+		"a channel with no dial policy, constraints, or minTotalUnderlays is simple")
+}
+
+// Test_applyConstraints_ClosesBelowMinTotalWithoutConstraints verifies that a channel with
+// only MinTotalUnderlays set (no per-type constraints, no dial policy) still closes when its
+// total underlay count drops below the minimum. This is the close-on-empty behavior a listener
+// relies on when it uses MinTotalUnderlays as its sole multi-underlay signal.
+func Test_applyConstraints_ClosesBelowMinTotalWithoutConstraints(t *testing.T) {
+	impl := &channelImpl{
+		minTotalUnderlays: 1,
+		underlays:         NewUnderlays(),
+		closeNotify:       make(chan struct{}),
+	}
+	var u Underlay = &testUnderlay{}
+	impl.fallbackUnderlay.Store(&u)
+
+	// No underlays remain, so the total (0) is below minTotalUnderlays (1). Even with no
+	// per-type constraints, applyConstraints must run the total check and close the channel.
+	impl.applyConstraints()
+
+	require.True(t, impl.IsClosed(), "channel below MinTotalUnderlays must close even with no per-type constraints")
 }
