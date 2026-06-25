@@ -67,6 +67,63 @@ func Test_BackoffDelay_CappedAtMaxDelay(t *testing.T) {
 	require.Equal(t, time.Second, p.getBackoffDelay())
 }
 
+func Test_BackoffDelay_NoJitterIsExact(t *testing.T) {
+	p := newTestPolicy()
+	require.Equal(t, float64(0), p.Backoff.Jitter, "default policy has jitter disabled")
+
+	// With jitter disabled the delay is exactly the exponential value on every call.
+	p.recordFailure()
+	for range 10 {
+		require.Equal(t, 100*time.Millisecond, p.getBackoffDelay())
+	}
+
+	p.recordFailure()
+	for range 10 {
+		require.Equal(t, 200*time.Millisecond, p.getBackoffDelay())
+	}
+}
+
+func Test_BackoffDelay_JitterWithinBoundsAndVaries(t *testing.T) {
+	p := newTestPolicy()
+	p.Backoff.Jitter = 0.5
+
+	p.recordFailure() // base * 2^0 = 100ms
+	base := 100 * time.Millisecond
+	maxDelay := base + time.Duration(0.5*float64(base))
+
+	seen := map[time.Duration]struct{}{}
+	for range 200 {
+		d := p.getBackoffDelay()
+		require.GreaterOrEqual(t, d, base, "jitter only adds to the base delay")
+		require.LessOrEqual(t, d, maxDelay, "jitter never exceeds Jitter*delay")
+		seen[d] = struct{}{}
+	}
+	require.Greater(t, len(seen), 1, "jitter should produce varying delays")
+}
+
+func Test_BackoffDelay_JitterCappedAtOne(t *testing.T) {
+	p := newTestPolicy()
+	p.Backoff.Jitter = 5.0 // out of range, should clamp to 1.0
+
+	p.recordFailure() // base * 2^0 = 100ms
+	base := 100 * time.Millisecond
+	maxDelay := base + base // 1.0 * base on top
+
+	for range 200 {
+		d := p.getBackoffDelay()
+		require.GreaterOrEqual(t, d, base)
+		require.LessOrEqual(t, d, maxDelay, "out-of-range jitter is capped at 1.0")
+	}
+}
+
+func Test_BackoffDelay_JitterNotAppliedWithoutFailures(t *testing.T) {
+	p := newTestPolicy()
+	p.Backoff.Jitter = 0.5
+
+	// No failures means no delay, and jitter must not turn a zero delay into a non-zero one.
+	require.Equal(t, time.Duration(0), p.getBackoffDelay())
+}
+
 func Test_RecordFailure_RecordsNegativeEvent(t *testing.T) {
 	p := newTestPolicy()
 

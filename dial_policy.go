@@ -18,6 +18,7 @@ package channel
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -54,6 +55,12 @@ type BackoffConfig struct {
 	// If a dial is requested before this interval has elapsed since the last dial,
 	// the goroutine sleeps until the interval is satisfied.
 	MinDialInterval time.Duration
+	// Jitter is the maximum random fraction (0.0-1.0) of the computed backoff delay to add as
+	// jitter (default: 0, disabled). When many peers back off in lockstep off the same exponential
+	// schedule they re-dial simultaneously, producing a thundering herd on the destination. A
+	// non-zero Jitter spreads those redials by adding a random delay of up to Jitter*delay on top
+	// of the computed backoff. Values <= 0 disable jitter; values above 1.0 are capped at 1.0.
+	Jitter float64
 }
 
 // DefaultBackoffConfig provides sensible defaults for BackoffConfig.
@@ -133,6 +140,10 @@ func (self *BackoffDialPolicy) resetStaleFailures() {
 	}
 }
 
+// getBackoffDelay computes the delay before the next dial attempt. It is the exponential backoff
+// (baseDelay * 2^(failures-1), capped at MaxDelay), optionally with random jitter added on top when
+// Backoff.Jitter is configured. Jitter spreads otherwise-synchronized redials across peers; see
+// BackoffConfig.Jitter. With no failures the delay is zero and no jitter is applied.
 func (self *BackoffDialPolicy) getBackoffDelay() time.Duration {
 	self.mu.Lock()
 	defer self.mu.Unlock()
@@ -143,7 +154,16 @@ func (self *BackoffDialPolicy) getBackoffDelay() time.Duration {
 
 	// Exponential backoff: baseDelay * 2^(failures-1), capped at maxDelay
 	delay := self.Backoff.BaseDelay * (1 << min(self.consecutiveFailures-1, 30))
-	return min(delay, self.Backoff.MaxDelay)
+	delay = min(delay, self.Backoff.MaxDelay)
+
+	if jitter := self.Backoff.Jitter; jitter > 0 && delay > 0 {
+		if jitter > 1.0 {
+			jitter = 1.0
+		}
+		delay += time.Duration(rand.Float64() * jitter * float64(delay))
+	}
+
+	return delay
 }
 
 func (self *BackoffDialPolicy) recordSuccess() {
