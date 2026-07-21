@@ -19,10 +19,12 @@ package channel
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
 	"io"
 	"log/slog"
+	"math"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 // MessageStrategy provides pluggable message serialization and deserialization.
@@ -87,9 +89,29 @@ func LoadOptions(data map[interface{}]interface{}) (*Options, error) {
 // This allows callers to adjust defaults before loading configuration.
 func (o *Options) Load(data map[interface{}]interface{}) error {
 	if value, found := data["outQueueSize"]; found {
-		if floatValue, ok := value.(float64); ok {
-			o.OutQueueSize = int(floatValue)
+		// Accept both int and float64 (YAML decodes integers as int, JSON as
+		// float64), but reject values that are invalid as a channel buffer size:
+		// a negative size panics in make(chan ...), and fractional/out-of-range
+		// floats must be rejected rather than silently truncated.
+		var size int
+		switch v := value.(type) {
+		case int:
+			size = v
+		case float64:
+			if v != math.Trunc(v) {
+				return errors.Errorf("invalid outQueueSize %v: must be a whole number", v)
+			}
+			if v < math.MinInt || v > math.MaxInt {
+				return errors.Errorf("invalid outQueueSize %v: out of range", v)
+			}
+			size = int(v)
+		default:
+			return errors.Errorf("invalid outQueueSize (%T): expected a number", value)
 		}
+		if size < 0 {
+			return errors.Errorf("invalid outQueueSize %d: must not be negative", size)
+		}
+		o.OutQueueSize = size
 	}
 
 	if value, found := data["maxQueuedConnects"]; found {
@@ -104,7 +126,19 @@ func (o *Options) Load(data map[interface{}]interface{}) error {
 		}
 	}
 
-	if value, found := data["connectTimeoutMs"]; found {
+	// Prefer connectTimeout as a duration string (e.g. "5s"); fall back to the
+	// legacy connectTimeoutMs integer-millisecond form when it is not present.
+	if value, found := data["connectTimeout"]; found {
+		if strVal, ok := value.(string); ok {
+			d, err := time.ParseDuration(strVal)
+			if err != nil {
+				return errors.Wrapf(err, "invalid value for connectTimeout: %v", value)
+			}
+			o.ConnectTimeout = d
+		} else {
+			return errors.Errorf("invalid (non-string) value for connectTimeout: %v", value)
+		}
+	} else if value, found := data["connectTimeoutMs"]; found {
 		if intVal, ok := value.(int); ok {
 			o.ConnectTimeout = time.Duration(intVal) * time.Millisecond
 		}
