@@ -418,6 +418,70 @@ func Test_MultiListener_AckFailureReleasesReservation(t *testing.T) {
 	require.False(t, hasNotifier, "the create-notifier should be released after an ack failure")
 }
 
+// Test_MultiListener_AdmitterRefusalHasNoSideEffects verifies that refusing a channel leaves nothing
+// behind. In particular the hello must not be acknowledged: the dialer's create then fails and it starts
+// over with a new group, rather than being released to dial underlays for a group that was never created.
+func Test_MultiListener_AdmitterRefusalHasNoSideEffects(t *testing.T) {
+	factoryCalled := false
+	ml := NewMultiListenerWithConfig(MultiListenerConfig{
+		Factory: func(underlay Underlay, closeCallback func()) (Channel, error) {
+			factoryCalled = true
+			return &testChannel{connId: underlay.ConnectionId()}, nil
+		},
+		UngroupedChannelFallback: func(underlay Underlay) error {
+			return errors.New("ungrouped not expected")
+		},
+		Admitter: func(Underlay) error { return errors.New("at capacity") },
+	})
+
+	underlay := newGroupedTestUnderlay("conn-1", true)
+	ackCalled := false
+	ml.AcceptUnderlay(underlay, func() error {
+		ackCalled = true
+		return nil
+	})
+
+	require.False(t, ackCalled, "a refused channel must not have its hello acknowledged")
+	require.False(t, factoryCalled, "a refused channel must not be created")
+	require.True(t, underlay.closed, "a refused underlay must be closed")
+
+	ml.lock.Lock()
+	_, hasChannel := ml.channels["conn-1"]
+	_, hasNotifier := ml.createNotifiers["conn-1"]
+	ml.lock.Unlock()
+	require.False(t, hasChannel, "a refused channel must not be registered")
+	require.False(t, hasNotifier, "a refused group must not be left holding a reservation")
+}
+
+// Test_MultiListener_AdmitterOnlyConsultedForFirstUnderlay verifies a group is never refused partway
+// through assembly: once its channel exists, further underlays attach without consulting the admitter.
+func Test_MultiListener_AdmitterOnlyConsultedForFirstUnderlay(t *testing.T) {
+	ch := &testChannel{connId: "conn-1"}
+	var admitterCalls atomic.Int32
+	ml := NewMultiListenerWithConfig(MultiListenerConfig{
+		Factory: func(underlay Underlay, closeCallback func()) (Channel, error) {
+			return ch, nil
+		},
+		UngroupedChannelFallback: func(underlay Underlay) error {
+			return errors.New("ungrouped not expected")
+		},
+		Admitter: func(Underlay) error {
+			admitterCalls.Add(1)
+			return nil
+		},
+	})
+
+	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), ackOK)
+	require.Equal(t, int32(1), admitterCalls.Load(), "the first underlay must be admitted")
+
+	second := newGroupedTestUnderlay("conn-1", false)
+	ml.AcceptUnderlay(second, ackOK)
+
+	require.Equal(t, int32(1), admitterCalls.Load(), "a non-first underlay must not be re-admitted")
+	require.Equal(t, 1, ch.acceptCount, "a non-first underlay must attach to the existing channel")
+	require.False(t, second.closed, "a non-first underlay must not be closed")
+}
+
 // Test_MultiListener_NonFirstAttachesWhileFirstInFlight verifies the reconnect-race fix:
 // a subsequent underlay that arrives while its group's first connection is still being
 // created waits for the group and attaches, rather than being rejected.
