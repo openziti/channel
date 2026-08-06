@@ -47,13 +47,27 @@ type registration struct {
 	closed atomic.Bool
 }
 
-// Admitter reports whether a new grouped channel may be created for an incoming first underlay, returning
-// an error to refuse it. It is the only point at which an application can decline a channel without
-// consequence, because it runs before the group id is reserved and before the hello is acknowledged: the
-// dialer's create then fails and it starts over with a new group. Declining later, by failing the Factory,
-// cannot be communicated to a dialer that the acknowledgement has already released.
+// Admitter reports whether a new grouped channel may be created for an incoming underlay, returning an
+// error to refuse it. It is the only point at which an application can decline a channel without
+// consequence, because it runs before the hello is acknowledged: the dialer's create then fails and it
+// starts over with a new group. Declining later, by failing the Factory, cannot be communicated to a
+// dialer that the acknowledgement has already released.
 //
-// It is called on the accept path, so it should be a cheap decision (admission or capacity), not work.
+// It is consulted only for an underlay that is about to create a channel. An underlay attaching to an
+// established or in-flight group is never re-admitted, so a group cannot be refused partway through
+// assembly, and a refusal never costs an established channel one of its underlays. Ungrouped underlays
+// go to the UngroupedChannelFallback and are not admitted at all.
+//
+// It is consulted per group, not per peer: a channel that loses all its underlays reconnects as a new
+// group with a new id, which is admitted again while the old channel may still be closing. An admitter
+// enforcing a per-peer limit has to tolerate that overlap or it will refuse legitimate reconnects.
+//
+// The returned error is logged and otherwise discarded; there is no way to convey a refusal reason to
+// the dialer, which sees only a closed connection. An application that needs to count or alert on
+// refusals should do so in its Admitter, which knows the reason.
+//
+// It is called on the accept path with the group's id reserved, so it should be a cheap decision
+// (admission or capacity), not work.
 type Admitter func(underlay Underlay) error
 
 // MultiListener routes incoming underlays to existing channels or creates new ones.
@@ -86,7 +100,7 @@ type MultiListenerConfig struct {
 // registered and the reservation is released, while the dialer has already been acknowledged
 // and will dial the group's remaining underlays; those find nothing and are closed. An
 // application that may decline a channel should therefore do so from an Admitter, which is
-// consulted before the reservation and the ack.
+// consulted before the ack.
 func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() error) {
 	isGrouped, _ := Headers(underlay.Headers()).GetBoolHeader(IsGroupedHeader)
 
@@ -112,21 +126,6 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 
 	chId := underlay.ConnectionId()
 	isFirst, _ := Headers(underlay.Headers()).GetBoolHeader(IsFirstGroupConnection)
-
-	// A first underlay is a request to create a channel, so this is where a refusal is still free: the
-	// group id has not been reserved and the hello has not been acknowledged, so closing the underlay
-	// fails the dialer's create and it starts over with a new group. Consulted outside the lock, since it
-	// calls out to the application, and only for a first underlay, so a group is never refused midway
-	// through being assembled.
-	if isFirst && self.admitter != nil {
-		if err := self.admitter(underlay); err != nil {
-			log.WithError(err).Info("channel not admitted, closing underlay without acknowledging hello")
-			if closeErr := underlay.Close(); closeErr != nil {
-				log.WithError(closeErr).Error("error closing underlay")
-			}
-			return
-		}
-	}
 
 	var ch Channel
 	channelExists := false
@@ -200,28 +199,37 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 		}
 	}
 
+	// Holding the reservation but not yet acknowledged is the last point at which a refusal is free:
+	// releasing the reservation and closing the underlay leaves nothing behind, and the dialer's create
+	// fails and starts over with a new group. A non-nil createLockNotifier means this underlay is the one
+	// creating the channel, so an underlay attaching to an existing or in-flight group is never admitted.
+	// Consulted outside the lock, since it calls out to the application; concurrent underlays for the same
+	// group wait on the reservation meanwhile, as they do for the Factory.
+	if createLockNotifier != nil && self.admitter != nil {
+		if err := self.admitter(underlay); err != nil {
+			log.WithError(err).Debug("channel not admitted, closing underlay without acknowledging hello")
+			self.releaseReservation(chId, createLockNotifier)
+			if closeErr := underlay.Close(); closeErr != nil {
+				log.WithError(closeErr).Error("error closing underlay")
+			}
+			return
+		}
+	}
+
 	// The group is now registered (an existing channel, or our create-in-progress
 	// notifier). Acknowledge the hello: this releases the dialer to dial subsequent
 	// underlays, which will now find the group rather than racing its creation.
 	if err := ackHello(); err != nil {
 		log.WithError(err).Error("error acknowledging hello")
 		if createLockNotifier != nil {
-			self.lock.Lock()
-			delete(self.createNotifiers, chId)
-			close(createLockNotifier)
-			self.lock.Unlock()
+			self.releaseReservation(chId, createLockNotifier)
 		}
 		_ = underlay.Close()
 		return
 	}
 
 	if createLockNotifier != nil {
-		defer func() {
-			self.lock.Lock()
-			delete(self.createNotifiers, chId)
-			close(createLockNotifier)
-			self.lock.Unlock()
-		}()
+		defer self.releaseReservation(chId, createLockNotifier)
 	}
 
 	if channelExists {
@@ -271,6 +279,15 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 	}
 }
 
+// releaseReservation removes the group's create-in-progress reservation and wakes any underlays
+// waiting on it, whether the create succeeded, failed, or was never attempted.
+func (self *MultiListener) releaseReservation(chId string, notifier chan struct{}) {
+	self.lock.Lock()
+	delete(self.createNotifiers, chId)
+	close(notifier)
+	self.lock.Unlock()
+}
+
 // closeRegistration removes reg from the listener's map, but only if it is still the
 // registration for chId. The identity check prevents a closing channel's callback from
 // evicting a newer channel that has already reconnected under the same id.
@@ -296,8 +313,17 @@ func NewMultiListener(channelF Factory, fallback UngroupedChannelFallback) *Mult
 
 // NewMultiListenerWithConfig creates a MultiListener from a config, so that everything it depends on is
 // fixed at construction and read-only thereafter, and so later options can be added without changing this
-// signature.
+// signature. It panics if a required field is missing, since the alternative is a nil dereference in an
+// accept goroutine the first time a matching underlay arrives, long after the wiring mistake was made.
 func NewMultiListenerWithConfig(config MultiListenerConfig) *MultiListener {
+	if config.Factory == nil {
+		panic(errors.New("MultiListenerConfig.Factory is required"))
+	}
+
+	if config.UngroupedChannelFallback == nil {
+		panic(errors.New("MultiListenerConfig.UngroupedChannelFallback is required"))
+	}
+
 	return &MultiListener{
 		channels:                 make(map[string]*registration),
 		multiChannelFactory:      config.Factory,
