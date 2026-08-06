@@ -409,12 +409,13 @@ type testUnderlay struct {
 	connectionId string
 	closed       bool
 	createdAt    time.Time
+	sent         []*Message
 }
 
 func (t *testUnderlay) CreatedAt() time.Time { return t.createdAt }
 
 func (t *testUnderlay) Rx() (*Message, error)               { return nil, nil }
-func (t *testUnderlay) Tx(*Message) error                   { return nil }
+func (t *testUnderlay) Tx(m *Message) error                 { t.sent = append(t.sent, m); return nil }
 func (t *testUnderlay) Id() string                          { return "test" }
 func (t *testUnderlay) LogicalName() string                 { return "test" }
 func (t *testUnderlay) Certificates() []*x509.Certificate   { return nil }

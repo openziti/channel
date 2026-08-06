@@ -52,6 +52,7 @@ const (
 	GroupSecretHeader               = 10
 	IsFirstGroupConnection          = 11
 	UnderlayTypeHeader              = 12
+	HelloRejectClassHeader          = 13
 
 	// Headers in the range 128-255 inclusive will be reflected when creating replies
 	ReflectedHeaderBitMask = 1 << 7

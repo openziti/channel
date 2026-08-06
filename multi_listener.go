@@ -62,9 +62,10 @@ type registration struct {
 // group with a new id, which is admitted again while the old channel may still be closing. An admitter
 // enforcing a per-peer limit has to tolerate that overlap or it will refuse legitimate reconnects.
 //
-// The returned error is logged and otherwise discarded; there is no way to convey a refusal reason to
-// the dialer, which sees only a closed connection. An application that needs to count or alert on
-// refusals should do so in its Admitter, which knows the reason.
+// The returned error's text is sent to the dialer as a negative hello result, along with its
+// RejectClass if it is a RejectedError, so a refusal is distinguishable from a network failure. An
+// application that needs to count or alert on refusals should do so in its Admitter, which knows the
+// reason; nothing here aggregates them.
 //
 // It is called on the accept path with the group's id reserved, so it should be a cheap decision
 // (admission or capacity), not work.
@@ -207,10 +208,10 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 	// group wait on the reservation meanwhile, as they do for the Factory.
 	if createLockNotifier != nil && self.admitter != nil {
 		if err := self.admitter(underlay); err != nil {
-			log.WithError(err).Debug("channel not admitted, closing underlay without acknowledging hello")
+			log.WithError(err).Debug("channel not admitted, rejecting hello")
 			self.releaseReservation(chId, createLockNotifier)
-			if closeErr := underlay.Close(); closeErr != nil {
-				log.WithError(closeErr).Error("error closing underlay")
+			if rejectErr := RejectHello(underlay, err); rejectErr != nil {
+				log.WithError(rejectErr).Error("error rejecting underlay")
 			}
 			return
 		}

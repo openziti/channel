@@ -431,7 +431,9 @@ func Test_MultiListener_AdmitterRefusalHasNoSideEffects(t *testing.T) {
 		UngroupedChannelFallback: func(underlay Underlay) error {
 			return errors.New("ungrouped not expected")
 		},
-		Admitter: func(Underlay) error { return errors.New("at capacity") },
+		Admitter: func(Underlay) error {
+			return NewRejectedError(RejectClassBusy, "at capacity")
+		},
 	})
 
 	underlay := newGroupedTestUnderlay("conn-1", true)
@@ -444,6 +446,13 @@ func Test_MultiListener_AdmitterRefusalHasNoSideEffects(t *testing.T) {
 	require.False(t, ackCalled, "a refused channel must not have its hello acknowledged")
 	require.False(t, factoryCalled, "a refused channel must not be created")
 	require.True(t, underlay.closed, "a refused underlay must be closed")
+
+	require.Len(t, underlay.sent, 1, "a refused underlay must be told why before it is closed")
+	sent := underlay.sent[0]
+	require.False(t, UnmarshalResult(sent).Success)
+	require.Equal(t, "at capacity", UnmarshalResult(sent).Message)
+	require.Equal(t, RejectClassBusy, getRejectClass(sent),
+		"the admitter's classification must reach the dialer")
 
 	ml.lock.Lock()
 	_, hasChannel := ml.channels["conn-1"]
