@@ -34,6 +34,11 @@ type Channel interface {
 	Sender
 	UnderlayAcceptor
 	io.Closer
+	// IsClosed reports whether the channel has been closed. Implementations must make this
+	// a non-blocking read, equivalent to loading an atomic flag: no locks, no I/O, no calls
+	// that could block. Callers are allowed to invoke it while holding their own locks, and
+	// a Channel whose Close runs close handlers under a lock that IsClosed also takes would
+	// deadlock. Once true, it must stay true.
 	IsClosed() bool
 	Underlay() Underlay
 	Headers() map[int32][]byte
@@ -198,11 +203,19 @@ type DialUnderlayFactory interface {
 }
 
 // Underlay abstracts a physical communications channel, typically sitting on top of 'transport'.
+//
+// Close must be idempotent. Ownership of an underlay passes between the listener, acceptor
+// and channel layers, and more than one of them may close it, so implementations must treat
+// every call after the first as a no-op returning nil.
 type Underlay interface {
 	Rx() (*Message, error)
 	Tx(m *Message) error
 	Identity
 	io.Closer
+	// IsClosed reports whether the underlay has been closed. As with Channel.IsClosed,
+	// implementations must make this a non-blocking read, equivalent to loading an atomic
+	// flag, since callers may invoke it while holding their own locks. Once true, it must
+	// stay true.
 	IsClosed() bool
 	Headers() map[int32][]byte
 	SetWriteTimeout(duration time.Duration) error
