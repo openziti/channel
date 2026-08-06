@@ -25,6 +25,9 @@ import (
 // An UnderlayAcceptor take an Underlay and generally turns it into a channel for a specific use.
 // It can be used when handling multiple channel types on a single listener
 type UnderlayAcceptor interface {
+	// AcceptUnderlay takes ownership of u. Implementations must close u if they reject it,
+	// since some callers hand it off and do not close it themselves. Callers that do close a
+	// rejected underlay are relying on Underlay.Close being idempotent.
 	AcceptUnderlay(u Underlay) error
 }
 

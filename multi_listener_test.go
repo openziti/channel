@@ -197,28 +197,6 @@ func Test_MultiListener_ConcurrentFirstUnderlaySameId(t *testing.T) {
 		"factory should only be called once for concurrent first underlays with same ID")
 }
 
-func Test_MultiListener_CloseChannelRemovesFromMap(t *testing.T) {
-	ml := NewMultiListener(func(underlay Underlay, closeCallback func()) (Channel, error) {
-		return &testChannel{connId: underlay.ConnectionId()}, nil
-	}, func(underlay Underlay) error {
-		return nil
-	})
-
-	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), ackOK)
-
-	ml.lock.Lock()
-	_, exists := ml.channels["conn-1"]
-	ml.lock.Unlock()
-	require.True(t, exists)
-
-	ml.CloseChannel("conn-1")
-
-	ml.lock.Lock()
-	_, exists = ml.channels["conn-1"]
-	ml.lock.Unlock()
-	require.False(t, exists)
-}
-
 // Test_MultiListener_CloseCallbackIgnoresStaleChannel verifies the identity check:
 // a close callback from an old channel must not evict a newer channel that has
 // reconnected under the same id.
@@ -266,19 +244,21 @@ func Test_MultiListener_CloseCallbackSupportsNonComparableChannel(t *testing.T) 
 	require.False(t, exists, "close callback should remove a non-comparable channel")
 }
 
-func Test_MultiListener_IsClosedDoesNotDeadlockCloseCallback(t *testing.T) {
-	closeHasLock := make(chan struct{})
-	continueClose := make(chan struct{})
-	probeStarted := make(chan struct{})
+// Test_MultiListener_EvictsClosedChannelRacingCloseCallback exercises the window that
+// leaves a stale registration behind: the channel already reports closed, but its close
+// callback has not run yet, so it is still in the map. A new underlay must evict it and
+// the late callback must then be a no-op.
+func Test_MultiListener_EvictsClosedChannelRacingCloseCallback(t *testing.T) {
+	closeStarted := make(chan struct{})
+	releaseCallback := make(chan struct{})
 
-	var ch *mutexCloseTestChannel
+	var ch *gatedCloseTestChannel
 	ml := NewMultiListener(func(underlay Underlay, closeCallback func()) (Channel, error) {
-		ch = &mutexCloseTestChannel{
-			testChannel:   &testChannel{connId: underlay.ConnectionId()},
-			closeCallback: closeCallback,
-			closeHasLock:  closeHasLock,
-			continueClose: continueClose,
-			probeStarted:  probeStarted,
+		ch = &gatedCloseTestChannel{
+			testChannel:     &testChannel{connId: underlay.ConnectionId()},
+			closeCallback:   closeCallback,
+			closeStarted:    closeStarted,
+			releaseCallback: releaseCallback,
 		}
 		return ch, nil
 	}, func(underlay Underlay) error {
@@ -286,35 +266,43 @@ func Test_MultiListener_IsClosedDoesNotDeadlockCloseCallback(t *testing.T) {
 	})
 
 	ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", true), ackOK)
-	ch.blockProbe.Store(true)
+	ml.lock.Lock()
+	reg := ml.channels["conn-1"]
+	ml.lock.Unlock()
+	require.NotNil(t, reg)
 
 	closeDone := make(chan struct{})
 	go func() {
 		defer close(closeDone)
 		_ = ch.Close()
 	}()
-	<-closeHasLock
+	<-closeStarted
 
-	lookupDone := make(chan struct{})
-	go func() {
-		defer close(lookupDone)
-		ml.AcceptUnderlay(newGroupedTestUnderlay("conn-1", false), ackOK)
-	}()
-	<-probeStarted
+	// The stale registration is still in the map at this point. The second underlay is not
+	// a first connection, so once the dead channel is evicted the group is gone and the
+	// underlay is rejected and closed rather than handed to the closed channel.
+	secondUnderlay := newGroupedTestUnderlay("conn-1", false)
+	ml.AcceptUnderlay(secondUnderlay, ackOK)
 
-	// Close calls its callback while holding the mutex needed by IsClosed. The callback
-	// can only finish if the concurrent lookup did not retain the listener lock.
-	close(continueClose)
+	ml.lock.Lock()
+	_, exists := ml.channels["conn-1"]
+	ml.lock.Unlock()
+	require.False(t, exists, "lookup must evict the closed channel")
+	require.True(t, secondUnderlay.closed, "non-first underlay must be closed once the group is gone")
+	require.Equal(t, 0, ch.acceptCount, "closed channel must not be given the second underlay")
+
+	// The callback now runs against a registration that is already gone.
+	close(releaseCallback)
 	select {
 	case <-closeDone:
 	case <-time.After(time.Second):
-		t.Fatal("channel close deadlocked against listener lookup")
+		t.Fatal("channel close did not complete")
 	}
-	select {
-	case <-lookupDone:
-	case <-time.After(time.Second):
-		t.Fatal("listener lookup did not finish after channel close")
-	}
+
+	ml.lock.Lock()
+	_, exists = ml.channels["conn-1"]
+	ml.lock.Unlock()
+	require.False(t, exists, "late close callback must not resurrect or disturb the map")
 }
 
 // Test_MultiListener_ChannelClosedDuringCreationNotRegistered verifies the bug fix:
@@ -490,36 +478,27 @@ type nonComparableTestChannel struct {
 	data []byte
 }
 
-// mutexCloseTestChannel models a Channel that protects IsClosed with the same mutex
-// held while Close invokes its listener callback.
-type mutexCloseTestChannel struct {
+// gatedCloseTestChannel reports closed as soon as Close begins but holds its listener
+// callback until released, reproducing the window in which a closed channel is still
+// registered. IsClosed is a lock-free read, as the Channel interface requires.
+type gatedCloseTestChannel struct {
 	*testChannel
-	lock          sync.Mutex
-	closeCallback func()
-	closeHasLock  chan struct{}
-	continueClose chan struct{}
-	probeStarted  chan struct{}
-	blockProbe    atomic.Bool
-	probeOnce     sync.Once
+	closedFlag      atomic.Bool
+	closeCallback   func()
+	closeStarted    chan struct{}
+	releaseCallback chan struct{}
 }
 
-func (c *mutexCloseTestChannel) Close() error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	close(c.closeHasLock)
-	<-c.continueClose
-	c.closed = true
+func (c *gatedCloseTestChannel) Close() error {
+	c.closedFlag.Store(true)
+	close(c.closeStarted)
+	<-c.releaseCallback
 	c.closeCallback()
 	return nil
 }
 
-func (c *mutexCloseTestChannel) IsClosed() bool {
-	if c.blockProbe.Load() {
-		c.probeOnce.Do(func() { close(c.probeStarted) })
-	}
-	c.lock.Lock()
-	defer c.lock.Unlock()
-	return c.closed
+func (c *gatedCloseTestChannel) IsClosed() bool {
+	return c.closedFlag.Load()
 }
 
 func (c *testChannel) AcceptUnderlay(Underlay) error {

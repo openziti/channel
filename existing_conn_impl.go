@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -33,7 +32,6 @@ type existingConnImpl struct {
 	id           *identity.TokenId
 	connectionId string
 	headers      map[int32][]byte
-	closeLock    sync.Mutex
 	closed       atomic.Bool
 	readF        readFunction
 	marshalF     marshalFunction
@@ -117,9 +115,6 @@ func (impl *existingConnImpl) Label() string {
 }
 
 func (impl *existingConnImpl) Close() error {
-	impl.closeLock.Lock()
-	defer impl.closeLock.Unlock()
-
 	if impl.closed.CompareAndSwap(false, true) {
 		return impl.peer.Close()
 	}

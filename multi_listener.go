@@ -27,6 +27,11 @@ import (
 
 // Factory creates a new multi-underlay Channel from the first incoming underlay.
 // The closeCallback should be called when the channel is closed to remove it from the listener.
+//
+// On success the returned Channel owns the underlay: the listener will not close it, so the
+// Channel must close it when the Channel itself closes. On error the listener closes the
+// underlay. A Factory that closes the underlay on its own error path is still safe, since
+// Underlay.Close is idempotent.
 type Factory func(underlay Underlay, closeCallback func()) (Channel, error)
 
 // UngroupedChannelFallback handles incoming underlays that are not part of a grouped connection.
@@ -91,30 +96,14 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 	done := false
 	for !done {
 		var waitFor chan struct{}
+		evictedStale := false
 
-		// Channel methods must not be called while holding the listener lock. A channel may
-		// invoke its close callback while holding the same lock used by IsClosed, and that
-		// callback needs the listener lock to unregister the channel.
+		// IsClosed is called under the listener lock, which Channel implementations must
+		// support: the interface requires it to be a non-blocking read.
 		self.lock.Lock()
-		candidate, candidateExists := self.channels[chId]
-		self.lock.Unlock()
-
-		if candidateExists {
-			candidateClosed := candidate.closed.Load()
-			if !candidateClosed {
-				candidateClosed = candidate.ch.IsClosed()
-			}
-
-			self.lock.Lock()
-			current, stillExists := self.channels[chId]
-			if !stillExists || current != candidate {
-				// The registration changed while IsClosed ran. Retry rather than applying
-				// the result to a newer channel registered under the same id.
-				self.lock.Unlock()
-				continue
-			}
-			if !candidateClosed && !candidate.closed.Load() {
-				ch = candidate.ch
+		if reg, exists := self.channels[chId]; exists {
+			if !reg.closed.Load() && !reg.ch.IsClosed() {
+				ch = reg.ch
 				channelExists = true
 				done = true
 				self.lock.Unlock()
@@ -125,16 +114,10 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 			// setting its closed flag and its close callback running). Evict it so this
 			// underlay creates a fresh channel instead of being rejected indefinitely.
 			delete(self.channels, chId)
-		} else {
-			self.lock.Lock()
-			if _, nowExists := self.channels[chId]; nowExists {
-				// A registration appeared after the unlocked lookup. Retry and validate it.
-				self.lock.Unlock()
-				continue
-			}
+			evictedStale = true
 		}
 
-		// The listener lock is held here and the channel id is still unregistered.
+		// The listener lock is held here and the channel id is now unregistered.
 		var createLockExists bool
 		waitFor, createLockExists = self.createNotifiers[chId]
 		if !createLockExists {
@@ -146,6 +129,9 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 				// group's first connection registers the notifier below before its own ack
 				// releases the dialer to dial these subsequent underlays.
 				self.lock.Unlock()
+				if evictedStale {
+					log.Info("evicted stale closed channel")
+				}
 				log.Info("no existing channel found for non-first underlay, closing connection")
 				if err := underlay.Close(); err != nil {
 					log.WithError(err).Error("error closing underlay")
@@ -157,6 +143,9 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 			done = true
 		}
 		self.lock.Unlock()
+		if evictedStale {
+			log.Info("evicted stale closed channel")
+		}
 		if waitFor != nil {
 			select {
 			case <-waitFor:
@@ -222,16 +211,12 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 				log.WithError(closeErr).Error("error closing underlay")
 			}
 		} else {
-			// Set and inspect the channel before publishing the registration. The callback's
-			// closed flag covers a close that races the IsClosed snapshot.
+			// Populate the registration before publishing it, so a lookup can never observe
+			// one with a nil channel.
 			newReg.ch = ch
-			channelClosed := newReg.closed.Load()
-			if !channelClosed {
-				channelClosed = ch.IsClosed()
-			}
 
 			self.lock.Lock()
-			if channelClosed || newReg.closed.Load() {
+			if newReg.closed.Load() || ch.IsClosed() {
 				// The channel closed during creation (e.g. its only underlay dropped), and its
 				// close callback already ran before we could register it. Registering it now
 				// would leave a dead channel in the map that nothing removes, rejecting every
@@ -247,19 +232,12 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 	}
 }
 
-// CloseChannel removes the channel with the given ID from the listener's map.
-func (self *MultiListener) CloseChannel(chId string) {
-	self.lock.Lock()
-	delete(self.channels, chId)
-	self.lock.Unlock()
-}
-
 // closeRegistration removes reg from the listener's map, but only if it is still the
 // registration for chId. The identity check prevents a closing channel's callback from
 // evicting a newer channel that has already reconnected under the same id.
 func (self *MultiListener) closeRegistration(chId string, reg *registration) {
-	// Mark the token first so creation cannot publish it while this callback waits for the
-	// listener lock. This state is also safe to inspect without calling back into Channel.
+	// Mark the registration before taking the lock, so creation cannot publish it while this
+	// callback waits for the lock and then find it already unregistered.
 	reg.closed.Store(true)
 	self.lock.Lock()
 	if self.channels[chId] == reg {

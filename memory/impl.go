@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/michaelquigley/pfxlog"
@@ -46,8 +46,7 @@ type memoryImpl struct {
 	id           *identity.TokenId
 	connectionId string
 	headers      map[int32][]byte
-	closeLock    sync.Mutex
-	closed       bool
+	closed       atomic.Bool
 	createdAt    time.Time
 }
 
@@ -72,7 +71,7 @@ func (self *memoryImpl) SetWriteDeadline(deadline time.Time) error {
 }
 
 func (self *memoryImpl) Rx() (*channel.Message, error) {
-	if self.closed {
+	if self.closed.Load() {
 		return nil, errors.New("underlay closed")
 	}
 
@@ -85,7 +84,7 @@ func (self *memoryImpl) Rx() (*channel.Message, error) {
 }
 
 func (self *memoryImpl) Tx(m *channel.Message) error {
-	if self.closed {
+	if self.closed.Load() {
 		return errors.New("underlay closed")
 	}
 	defer func() {
@@ -124,18 +123,14 @@ func (self *memoryImpl) Label() string {
 }
 
 func (self *memoryImpl) Close() error {
-	self.closeLock.Lock()
-	defer self.closeLock.Unlock()
-
-	if !self.closed {
-		self.closed = true
+	if self.closed.CompareAndSwap(false, true) {
 		close(self.tx)
 	}
 	return nil
 }
 
 func (self *memoryImpl) IsClosed() bool {
-	return self.closed
+	return self.closed.Load()
 }
 
 func newMemoryImpl(tx, rx chan *channel.Message) *memoryImpl {

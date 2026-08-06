@@ -20,7 +20,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openziti/identity"
@@ -32,8 +32,7 @@ type wsImpl struct {
 	id           *identity.TokenId
 	connectionId string
 	headers      map[int32][]byte
-	closeLock    sync.Mutex
-	closed       bool
+	closed       atomic.Bool
 	readF        readFunction
 	marshalF     marshalFunction
 	createdAt    time.Time
@@ -52,14 +51,14 @@ func (self *wsImpl) SetWriteDeadline(deadline time.Time) error {
 }
 
 func (self *wsImpl) Rx() (*Message, error) {
-	if self.closed {
+	if self.closed.Load() {
 		return nil, errors.New("underlay closed")
 	}
 	return self.readF(self.peer)
 }
 
 func (self *wsImpl) Tx(m *Message) error {
-	if self.closed {
+	if self.closed.Load() {
 		return errors.New("underlay closed")
 	}
 
@@ -101,18 +100,14 @@ func (self *wsImpl) Label() string {
 }
 
 func (self *wsImpl) Close() error {
-	self.closeLock.Lock()
-	defer self.closeLock.Unlock()
-
-	if !self.closed {
-		self.closed = true
+	if self.closed.CompareAndSwap(false, true) {
 		return self.peer.Close()
 	}
 	return nil
 }
 
 func (self *wsImpl) IsClosed() bool {
-	return self.closed
+	return self.closed.Load()
 }
 
 func newWSImpl(peer transport.Conn, version uint32) *wsImpl {
