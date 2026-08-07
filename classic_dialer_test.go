@@ -101,14 +101,8 @@ func Test_ClassicDialer_RetriesHelloOnlyToRenegotiateVersion(t *testing.T) {
 		expectedDials int32
 	}{
 		{
-			name: "version renegotiation is retried",
-			respond: func(conn net.Conn) {
-				WriteUnknownVersionResponse(conn)
-				// ReadV2 reads a full frame before it inspects the magic, so a version response is
-				// only recognized as one once a frame's worth of bytes has arrived. Pad to that
-				// length so this exercises the negotiation path rather than a short read.
-				_, _ = conn.Write(make([]byte, dataSectionV2))
-			},
+			name:          "version renegotiation is retried",
+			respond:       func(conn net.Conn) { WriteUnknownVersionResponse(conn) },
 			expectedDials: 2,
 		},
 		{

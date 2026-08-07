@@ -17,9 +17,13 @@
 package channel
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_getRetryVersionFor(t *testing.T) {
@@ -61,6 +65,86 @@ func Test_getRetryVersionFor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_readUnknownVersionResponse covers parsing a version negotiation response, whose bytes may
+// arrive alongside the magic, after it, or split between the two, since the magic is classified as
+// soon as it is read rather than after a whole frame's worth of bytes.
+func Test_readUnknownVersionResponse(t *testing.T) {
+	// encode builds the body of a version response: a count followed by that many versions.
+	encode := func(versions ...uint32) []byte {
+		body := binary.LittleEndian.AppendUint32(nil, uint32(len(versions)))
+		for _, version := range versions {
+			body = binary.LittleEndian.AppendUint32(body, version)
+		}
+		return body
+	}
+
+	supportedVersions := func(t *testing.T, err error) []uint32 {
+		t.Helper()
+		var versionErr UnsupportedVersionError
+		require.ErrorAs(t, err, &versionErr)
+		return versionErr.supportedVersions
+	}
+
+	t.Run("wholly buffered", func(t *testing.T) {
+		err := readUnknownVersionResponse(encode(1, 2), bytes.NewReader(nil))
+		require.Equal(t, []uint32{1, 2}, supportedVersions(t, err))
+	})
+
+	t.Run("wholly unread", func(t *testing.T) {
+		err := readUnknownVersionResponse(nil, bytes.NewReader(encode(1, 2)))
+		require.Equal(t, []uint32{1, 2}, supportedVersions(t, err))
+	})
+
+	t.Run("split across the buffer and the wire", func(t *testing.T) {
+		body := encode(1, 2)
+		for split := range len(body) {
+			err := readUnknownVersionResponse(body[:split], bytes.NewReader(body[split:]))
+			require.Equal(t, []uint32{1, 2}, supportedVersions(t, err), "split after %v bytes", split)
+		}
+	})
+
+	t.Run("trailing bytes are not versions", func(t *testing.T) {
+		body := append(encode(2), 0xde, 0xad, 0xbe, 0xef)
+		err := readUnknownVersionResponse(body, bytes.NewReader(nil))
+		require.Equal(t, []uint32{2}, supportedVersions(t, err), "only the counted versions should be parsed")
+	})
+
+	t.Run("truncated response", func(t *testing.T) {
+		body := encode(1, 2)
+		err := readUnknownVersionResponse(body[:len(body)-1], bytes.NewReader(nil))
+		require.Error(t, err)
+		require.NotErrorAs(t, err, &UnsupportedVersionError{}, "a truncated response reports no versions")
+	})
+
+	t.Run("implausible version count", func(t *testing.T) {
+		// The versions are supplied too, so the count is refused on its own merits rather than
+		// because the response ran out of bytes.
+		body := binary.LittleEndian.AppendUint32(nil, maxSupportedVersionCount+1)
+		body = append(body, make([]byte, (maxSupportedVersionCount+1)*versionLen)...)
+
+		err := readUnknownVersionResponse(body, bytes.NewReader(nil))
+		require.Error(t, err)
+		require.NotErrorAs(t, err, &UnsupportedVersionError{}, "an implausible count must be refused, not allocated")
+	})
+}
+
+// Test_ReadV2_ClassifiesVersionResponseShorterThanAFrame verifies a version negotiation response is
+// recognized even though it is shorter than a message frame, which is what a listener actually sends
+// before closing the connection.
+func Test_ReadV2_ClassifiesVersionResponseShorterThanAFrame(t *testing.T) {
+	req := require.New(t)
+
+	response := new(bytes.Buffer)
+	WriteUnknownVersionResponse(response)
+	req.Less(response.Len(), dataSectionV2, "the response must be shorter than a frame for this to be a test")
+
+	_, err := ReadV2(bytes.NewReader(response.Bytes()))
+
+	var versionErr UnsupportedVersionError
+	req.ErrorAs(err, &versionErr)
+	req.Equal([]uint32{1, 2}, versionErr.supportedVersions)
 }
 
 func Test_StrSliceEncodeDecode(t *testing.T) {

@@ -405,6 +405,10 @@ var magicUnknownVersion = []byte{0x03, 0x06, 0x09, 0x0a}
 
 const versionLen = 4
 
+// maxSupportedVersionCount caps how many versions a peer may claim to support in a version
+// negotiation response. Two versions exist, so any real response is far below this.
+const maxSupportedVersionCount = 64
+
 /*
  * Channel V2 Wire Format
  *
@@ -479,23 +483,30 @@ func readHelloV2(peer io.Reader) (*Message, error) {
 // ReadV2 reads a V2 message from the given reader and returns the unmarshalled message
 func ReadV2(peer io.Reader) (*Message, error) {
 	messageSection := make([]byte, dataSectionV2)
-	read, err := io.ReadFull(peer, messageSection)
+
+	// Only the magic is required before the response can be classified. A version-negotiation
+	// response is shorter than a message frame, so waiting for a frame's worth of bytes would
+	// stall on a peer that sent a complete, correct response and then stopped. Reading at least
+	// the magic still takes a single read when a whole frame is already available.
+	read, err := io.ReadAtLeast(peer, messageSection, magicLength)
 	if err != nil {
 		return nil, err
 	}
 
-	if read < magicLength {
-		return nil, errors.New("short read")
-	}
-
 	if !bytes.Equal(messageSection[0:magicLength], magicV2) {
 		log := pfxlog.Logger()
-		log.Debugf("received message version bytes: %v", messageSection[:4])
+		log.Debugf("received message version bytes: %v", messageSection[:magicLength])
 		if bytes.Equal(messageSection[0:magicLength], magicUnknownVersion) {
 			log.Debug("message appears to be unknown version response")
-			return nil, readUnknownVersionResponse(messageSection[4:], peer)
+			return nil, readUnknownVersionResponse(messageSection[magicLength:read], peer)
 		}
 		return nil, BadMagicNumberError
+	}
+
+	if read < dataSectionV2 {
+		if _, err = io.ReadFull(peer, messageSection[read:]); err != nil {
+			return nil, err
+		}
 	}
 
 	headersLength := readUint32(messageSection[12:16])
@@ -677,33 +688,38 @@ func WriteUnknownVersionResponse(writer io.Writer) {
 	}
 }
 
+// readUnknownVersionResponse parses the versions a peer reported it supports, having already
+// consumed the response's magic. initial holds however much of the rest arrived alongside the
+// magic, which may be none of it; whatever is missing is read from reader.
 func readUnknownVersionResponse(initial []byte, reader io.Reader) error {
 	log := pfxlog.Logger()
-	if len(initial) < 4 {
-		log.Debug("didn't receive enough bytes for an unknown version response")
+	response := io.MultiReader(bytes.NewReader(initial), reader)
+
+	countBuf := make([]byte, versionLen)
+	if _, err := io.ReadFull(response, countBuf); err != nil {
+		log.WithError(err).Debug("didn't receive enough bytes for an unknown version response")
 		return errors.New("channel synchronization")
 	}
-	versionCount := binary.LittleEndian.Uint32(initial)
-	buf := initial[4:]
-	size := versionCount * 4
 
-	if uint32(len(buf)) < size {
-		leftover := buf
-		buf := make([]byte, size)
-		copy(buf, leftover)
-		restBuf := buf[len(leftover):]
-		if _, err := io.ReadFull(reader, restBuf); err != nil {
-			log.Debugf("unable to read all %v bytes for unknown version response", len(restBuf))
-			return errors.New("channel synchronization")
-		}
+	versionCount := binary.LittleEndian.Uint32(countBuf)
+	// The count comes from a peer that has not been authenticated, so it decides the size of an
+	// allocation before anything has been verified. Bound it well above any plausible number of
+	// protocol versions.
+	if versionCount > maxSupportedVersionCount {
+		log.Debugf("unknown version response claims an implausible %v versions", versionCount)
+		return errors.New("channel synchronization")
 	}
 
-	var supported []uint32
+	versionsBuf := make([]byte, versionCount*versionLen)
+	if _, err := io.ReadFull(response, versionsBuf); err != nil {
+		log.WithError(err).Debugf("unable to read all %v versions for unknown version response", versionCount)
+		return errors.New("channel synchronization")
+	}
 
-	for len(buf) > 0 {
-		version := binary.LittleEndian.Uint32(buf)
-		supported = append(supported, version)
-		buf = buf[4:]
+	supported := make([]uint32, 0, versionCount)
+	for len(versionsBuf) > 0 {
+		supported = append(supported, binary.LittleEndian.Uint32(versionsBuf))
+		versionsBuf = versionsBuf[versionLen:]
 	}
 
 	return UnsupportedVersionError{supportedVersions: supported}
