@@ -59,6 +59,10 @@ func (self RejectClass) String() string {
 
 // RejectedError reports a refused hello, in both directions: an application returns one from an
 // Admitter to classify its refusal, and a dialer receives one when a listener refuses its hello.
+//
+// A dialer receives it wrapped in a NonRetryableError, since a listener that declined a hello will
+// decline the same hello again; recover it with errors.As rather than a type assertion. Whether to
+// dial again later is the caller's decision, which is what the class is for.
 type RejectedError struct {
 	Class   RejectClass
 	Message string

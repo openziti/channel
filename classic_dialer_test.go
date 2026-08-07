@@ -18,12 +18,15 @@ package channel
 
 import (
 	"errors"
+	"fmt"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
+	"github.com/openziti/transport/v2/tcp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,4 +86,79 @@ func Test_sendHello_ClosesUnderlayOnFailure(t *testing.T) {
 		require.Error(t, err)
 		require.True(t, u.closed, "underlay must be closed on invalid-header response")
 	})
+}
+
+// Test_ClassicDialer_RetriesHelloOnlyToRenegotiateVersion pins what the dial loop's single retry is
+// for. Redialing helps only when the peer answered with a version we can speak; for anything else it
+// repeats an identical hello to the same endpoint, doubling the work a struggling listener has to do
+// to refuse or fail the same connection twice.
+func Test_ClassicDialer_RetriesHelloOnlyToRenegotiateVersion(t *testing.T) {
+	transport.AddAddressParser(tcp.AddressParser{})
+
+	tests := []struct {
+		name          string
+		respond       func(conn net.Conn)
+		expectedDials int32
+	}{
+		{
+			name: "version renegotiation is retried",
+			respond: func(conn net.Conn) {
+				WriteUnknownVersionResponse(conn)
+				// ReadV2 reads a full frame before it inspects the magic, so a version response is
+				// only recognized as one once a frame's worth of bytes has arrived. Pad to that
+				// length so this exercises the negotiation path rather than a short read.
+				_, _ = conn.Write(make([]byte, dataSectionV2))
+			},
+			expectedDials: 2,
+		},
+		{
+			name:          "any other hello failure is not retried",
+			respond:       func(conn net.Conn) {},
+			expectedDials: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := require.New(t)
+
+			var dials atomic.Int32
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			req.NoError(err)
+			defer func() { _ = listener.Close() }()
+
+			go func() {
+				for {
+					conn, acceptErr := listener.Accept()
+					if acceptErr != nil {
+						return
+					}
+					dials.Add(1)
+					go func() {
+						defer func() { _ = conn.Close() }()
+						_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+						_, _ = conn.Read(make([]byte, 4096))
+						tt.respond(conn)
+					}()
+				}
+			}()
+
+			port := listener.Addr().(*net.TCPAddr).Port
+			endpoint, err := transport.ParseAddress(fmt.Sprintf("tcp:127.0.0.1:%d", port))
+			req.NoError(err)
+
+			dialer := NewClassicDialer(DialerConfig{
+				Identity: &identity.TokenId{Token: "test-client"},
+				Endpoint: endpoint,
+			})
+
+			underlay, err := dialer.CreateWithHeaders(2*time.Second, nil)
+			req.Error(err, "the handshake never completes in this test")
+			if underlay != nil {
+				_ = underlay.Close()
+			}
+
+			req.Equal(tt.expectedDials, dials.Load())
+		})
+	}
 }
