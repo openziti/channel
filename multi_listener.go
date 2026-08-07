@@ -47,6 +47,30 @@ type registration struct {
 	closed atomic.Bool
 }
 
+// Admitter reports whether a new grouped channel may be created for an incoming underlay, returning an
+// error to refuse it. It is the only point at which an application can decline a channel without
+// consequence, because it runs before the hello is acknowledged: the dialer's create then fails and it
+// starts over with a new group. Declining later, by failing the Factory, cannot be communicated to a
+// dialer that the acknowledgement has already released.
+//
+// It is consulted only for an underlay that is about to create a channel. An underlay attaching to an
+// established or in-flight group is never re-admitted, so a group cannot be refused partway through
+// assembly, and a refusal never costs an established channel one of its underlays. Ungrouped underlays
+// go to the UngroupedChannelFallback and are not admitted at all.
+//
+// It is consulted per group, not per peer: a channel that loses all its underlays reconnects as a new
+// group with a new id, which is admitted again while the old channel may still be closing. An admitter
+// enforcing a per-peer limit has to tolerate that overlap or it will refuse legitimate reconnects.
+//
+// The returned error's text is sent to the dialer as a negative hello result, along with its
+// RejectClass if it is a RejectedError, so a refusal is distinguishable from a network failure. An
+// application that needs to count or alert on refusals should do so in its Admitter, which knows the
+// reason; nothing here aggregates them.
+//
+// It is called on the accept path with the group's id reserved, so it should be a cheap decision
+// (admission or capacity), not work.
+type Admitter func(underlay Underlay) error
+
 // MultiListener routes incoming underlays to existing channels or creates new ones.
 // Grouped underlays are matched by connection ID; ungrouped ones are passed to the fallback.
 type MultiListener struct {
@@ -55,14 +79,29 @@ type MultiListener struct {
 	multiChannelFactory      Factory
 	ungroupedChannelFallback UngroupedChannelFallback
 	createNotifiers          map[string]chan struct{}
+	admitter                 Admitter
+}
+
+// MultiListenerConfig configures a MultiListener. Factory and UngroupedChannelFallback are required.
+// Admitter is optional; with none set, every group is admitted.
+type MultiListenerConfig struct {
+	Factory                  Factory
+	UngroupedChannelFallback UngroupedChannelFallback
+	Admitter                 Admitter
 }
 
 // AcceptUnderlay routes an incoming underlay to an existing channel or creates a new one.
 // It implements HelloAcceptor: for a grouped first connection it registers the group
 // (reserving its id) before acknowledging the hello, so the ack - which releases the
 // dialer to dial subsequent underlays - cannot precede the group being known. A
-// subsequent underlay therefore always finds either the channel or a create-in-progress
+// subsequent underlay therefore finds either the channel or a create-in-progress
 // notifier and attaches, rather than racing group creation and being rejected.
+//
+// That holds as long as the channel is created. If the Factory fails, the group is never
+// registered and the reservation is released, while the dialer has already been acknowledged
+// and will dial the group's remaining underlays; those find nothing and are closed. An
+// application that may decline a channel should therefore do so from an Admitter, which is
+// consulted before the ack.
 func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() error) {
 	isGrouped, _ := Headers(underlay.Headers()).GetBoolHeader(IsGroupedHeader)
 
@@ -161,28 +200,37 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 		}
 	}
 
+	// Holding the reservation but not yet acknowledged is the last point at which a refusal is free:
+	// releasing the reservation and closing the underlay leaves nothing behind, and the dialer's create
+	// fails and starts over with a new group. A non-nil createLockNotifier means this underlay is the one
+	// creating the channel, so an underlay attaching to an existing or in-flight group is never admitted.
+	// Consulted outside the lock, since it calls out to the application; concurrent underlays for the same
+	// group wait on the reservation meanwhile, as they do for the Factory.
+	if createLockNotifier != nil && self.admitter != nil {
+		if err := self.admitter(underlay); err != nil {
+			log.WithError(err).Debug("channel not admitted, rejecting hello")
+			self.releaseReservation(chId, createLockNotifier)
+			if rejectErr := RejectHello(underlay, err); rejectErr != nil {
+				log.WithError(rejectErr).Error("error rejecting underlay")
+			}
+			return
+		}
+	}
+
 	// The group is now registered (an existing channel, or our create-in-progress
 	// notifier). Acknowledge the hello: this releases the dialer to dial subsequent
 	// underlays, which will now find the group rather than racing its creation.
 	if err := ackHello(); err != nil {
 		log.WithError(err).Error("error acknowledging hello")
 		if createLockNotifier != nil {
-			self.lock.Lock()
-			delete(self.createNotifiers, chId)
-			close(createLockNotifier)
-			self.lock.Unlock()
+			self.releaseReservation(chId, createLockNotifier)
 		}
 		_ = underlay.Close()
 		return
 	}
 
 	if createLockNotifier != nil {
-		defer func() {
-			self.lock.Lock()
-			delete(self.createNotifiers, chId)
-			close(createLockNotifier)
-			self.lock.Unlock()
-		}()
+		defer self.releaseReservation(chId, createLockNotifier)
 	}
 
 	if channelExists {
@@ -232,6 +280,15 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 	}
 }
 
+// releaseReservation removes the group's create-in-progress reservation and wakes any underlays
+// waiting on it, whether the create succeeded, failed, or was never attempted.
+func (self *MultiListener) releaseReservation(chId string, notifier chan struct{}) {
+	self.lock.Lock()
+	delete(self.createNotifiers, chId)
+	close(notifier)
+	self.lock.Unlock()
+}
+
 // closeRegistration removes reg from the listener's map, but only if it is still the
 // registration for chId. The identity check prevents a closing channel's callback from
 // evicting a newer channel that has already reconnected under the same id.
@@ -247,12 +304,32 @@ func (self *MultiListener) closeRegistration(chId string, reg *registration) {
 }
 
 // NewMultiListener creates a MultiListener with the given channel factory and ungrouped fallback.
+// Use NewMultiListenerWithConfig to configure anything beyond those two.
 func NewMultiListener(channelF Factory, fallback UngroupedChannelFallback) *MultiListener {
-	result := &MultiListener{
-		channels:                 make(map[string]*registration),
-		multiChannelFactory:      channelF,
-		ungroupedChannelFallback: fallback,
-		createNotifiers:          make(map[string]chan struct{}),
+	return NewMultiListenerWithConfig(MultiListenerConfig{
+		Factory:                  channelF,
+		UngroupedChannelFallback: fallback,
+	})
+}
+
+// NewMultiListenerWithConfig creates a MultiListener from a config, so that everything it depends on is
+// fixed at construction and read-only thereafter, and so later options can be added without changing this
+// signature. It panics if a required field is missing, since the alternative is a nil dereference in an
+// accept goroutine the first time a matching underlay arrives, long after the wiring mistake was made.
+func NewMultiListenerWithConfig(config MultiListenerConfig) *MultiListener {
+	if config.Factory == nil {
+		panic(errors.New("MultiListenerConfig.Factory is required"))
 	}
-	return result
+
+	if config.UngroupedChannelFallback == nil {
+		panic(errors.New("MultiListenerConfig.UngroupedChannelFallback is required"))
+	}
+
+	return &MultiListener{
+		channels:                 make(map[string]*registration),
+		multiChannelFactory:      config.Factory,
+		ungroupedChannelFallback: config.UngroupedChannelFallback,
+		createNotifiers:          make(map[string]chan struct{}),
+		admitter:                 config.Admitter,
+	}
 }

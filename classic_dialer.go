@@ -207,7 +207,7 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 	}
 	result := UnmarshalResult(response)
 	if !result.Success {
-		return errors.New(result.Message)
+		return &RejectedError{Class: getRejectClass(response), Message: result.Message}
 	}
 
 	// Use request.Headers (which includes any headers contributed by the HelloHeaderProvider)
