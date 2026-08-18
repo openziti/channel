@@ -137,12 +137,20 @@ func (self *classicDialer) CreateWithHeaders(timeout time.Duration, headers map[
 		if err = self.sendHello(underlay, deadline, headers); err != nil {
 			if tryCount > 0 || IsNonRetryable(err) {
 				return nil, err
-			} else {
-				log.WithError(err).Warnf("error initiating channel with hello")
 			}
+
+			// This retry renegotiates the protocol version, so it is worth making only when the peer
+			// named a version we can also speak. For any other failure it would redial the same
+			// endpoint with the same version and headers, asking a question already answered, and
+			// leave the caller's own retry policy to decide whether to try again at all.
+			retryVersion, versionNegotiable := GetRetryVersion(err)
+			if !versionNegotiable {
+				return nil, err
+			}
+
+			log.WithError(err).Warnf("error initiating channel with hello, retrying with protocol version %v", retryVersion)
 			tryCount++
-			version, _ = GetRetryVersion(err)
-			log.Warnf("Retrying dial with protocol version %v", version)
+			version = retryVersion
 			continue
 		}
 		return underlay, nil
@@ -207,7 +215,11 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 	}
 	result := UnmarshalResult(response)
 	if !result.Success {
-		return &RejectedError{Class: getRejectClass(response), Message: result.Message}
+		// A refusal is a decision, not a fault: the listener received the hello and declined it, so
+		// immediately dialing again with the same headers only asks the same question a second time.
+		// Marking it non-retryable keeps one refusal to one connection, which matters most when the
+		// reason is capacity and the retry lands on a listener already under pressure.
+		return &NonRetryableError{err: &RejectedError{Class: getRejectClass(response), Message: result.Message}}
 	}
 
 	// Use request.Headers (which includes any headers contributed by the HelloHeaderProvider)

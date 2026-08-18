@@ -19,6 +19,7 @@ package channel
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -91,7 +92,9 @@ func Test_RejectedError_Message(t *testing.T) {
 
 // Test_RejectHello_DialerReceivesClassifiedRefusal exercises the whole path over a real connection: an
 // Admitter refuses a channel, and the dialer's create fails with the classification rather than with an
-// unexplained connection close.
+// unexplained connection close. It also pins that the refusal costs the listener exactly one
+// connection: the dialer's hello retry exists for protocol version renegotiation, and a refusal it
+// retried would double the load on a listener that just said it had none to spare.
 func Test_RejectHello_DialerReceivesClassifiedRefusal(t *testing.T) {
 	transport.AddAddressParser(tcp.AddressParser{})
 	req := require.New(t)
@@ -101,6 +104,7 @@ func Test_RejectHello_DialerReceivesClassifiedRefusal(t *testing.T) {
 	dialAddr, err := transport.ParseAddress("tcp:127.0.0.1:6771")
 	req.NoError(err)
 
+	var admitterCalls atomic.Int32
 	multiListener := NewMultiListenerWithConfig(MultiListenerConfig{
 		Factory: func(Underlay, func()) (Channel, error) {
 			return nil, errors.New("factory should not be reached for a refused channel")
@@ -109,6 +113,7 @@ func Test_RejectHello_DialerReceivesClassifiedRefusal(t *testing.T) {
 			return errors.New("ungrouped not expected")
 		},
 		Admitter: func(Underlay) error {
+			admitterCalls.Add(1)
 			return NewRejectedError(RejectClassBusy, "controller at capacity")
 		},
 	})
@@ -134,8 +139,12 @@ func Test_RejectHello_DialerReceivesClassifiedRefusal(t *testing.T) {
 		_ = underlay.Close()
 	}
 
+	req.Equal(int32(1), admitterCalls.Load(), "a refused dial must not be retried into a second refusal")
+	req.True(IsNonRetryable(err), "a refusal must stop the dialer's hello retry")
+
 	var rejected *RejectedError
-	req.True(errors.As(err, &rejected), "a refusal must reach the dialer as a RejectedError, got %T: %v", err, err)
+	req.True(errors.As(err, &rejected),
+		"a refusal must remain recoverable through the non-retryable wrapper, got %T: %v", err, err)
 	req.Equal(RejectClassBusy, rejected.Class)
 	req.Equal("controller at capacity", rejected.Message)
 }
