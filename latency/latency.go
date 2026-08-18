@@ -25,7 +25,11 @@ import (
 )
 
 const (
-	probeTime = 128
+	// probeTime carries the probe's send timestamp. It uses the channel-level reflected
+	// header so that LatencyHandler, which answers with a bare Result, gets the timestamp
+	// back to the prober without copying it. Responder copies it explicitly instead, and
+	// is the better model for anything new.
+	probeTime = channel.ReflectedHeader
 )
 
 // LatencyHandler responds to latency messages with Result messages.
