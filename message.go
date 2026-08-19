@@ -31,8 +31,8 @@ import (
 /**
  * Message headers notes
  * 0-127 reserved for channel
- * 128-255 reserved for headers that need to be reflected back to sender on responses
- * 128 is used for a message UUID for tracing
+ * 128 is the reflected correlation header, see ReflectedHeader
+ * 129-255 formerly reflected, now unused and free to allocate
  * 1000-1099 reserved for edge messages
  * 1100-1199 is reserved for control plane messages
  * 2000-2500 is reserved for xgress messages
@@ -54,7 +54,20 @@ const (
 	UnderlayTypeHeader              = 12
 	HelloRejectClassHeader          = 13
 
-	// Headers in the range 128-255 inclusive will be reflected when creating replies
+	// ReflectedHeader is the one header ReplyTo copies from a request into its reply.
+	// It is a correlation slot: whatever the requester puts there comes back, so a
+	// requester can match a reply to a request without tracking state. Subsystems give
+	// the value their own meaning - the latency package carries a probe timestamp, the
+	// edge protocol carries a trace UUID - which is safe only because a given message
+	// has one content type and therefore one interpretation.
+	//
+	// Prefer copying headers explicitly in the responder over adding reflected headers.
+	// Reflection is invisible at both the sending and responding call sites, which makes
+	// a break in it hard to trace back.
+	ReflectedHeader = 128
+
+	// Deprecated: reflection is no longer a range. Only ReflectedHeader is reflected;
+	// these remain so existing references still compile and will be removed.
 	ReflectedHeaderBitMask = 1 << 7
 	MaxReflectedHeader     = (1 << 8) - 1
 )
@@ -385,10 +398,8 @@ func (m *Message) Context() context.Context {
 func (m *Message) ReplyTo(o *Message) Envelope {
 	replyFor := o.sequence
 	m.replyFor = &replyFor
-	for key, value := range o.Headers {
-		if key&ReflectedHeaderBitMask != 0 && key <= MaxReflectedHeader {
-			m.Headers[key] = value
-		}
+	if value, found := o.Headers[ReflectedHeader]; found {
+		m.Headers[ReflectedHeader] = value
 	}
 	return m
 }

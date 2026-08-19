@@ -248,3 +248,38 @@ func Test_StringToStringMapEncodeDecode(t *testing.T) {
 	req.NoError(err)
 	req.Equal((map[string]string)(nil), decoded)
 }
+
+func Test_ReplyToReflectsOnlyTheReflectedHeader(t *testing.T) {
+	req := NewMessage(1, nil)
+	req.sequence = 42
+	req.Headers[ReflectedHeader] = []byte("correlation-value")
+	req.Headers[ConnectionIdHeader] = []byte("not reflected")
+
+	// 129-255 were reflected before reflection narrowed to a single header
+	req.Headers[129] = []byte("formerly reflected")
+	req.Headers[200] = []byte("formerly reflected")
+	req.Headers[255] = []byte("formerly reflected")
+
+	reply := NewMessage(2, nil)
+	reply.ReplyTo(req)
+
+	assert.True(t, reply.IsReplyingTo(42))
+	assert.Equal(t, []byte("correlation-value"), reply.Headers[ReflectedHeader])
+
+	for _, key := range []int32{ConnectionIdHeader, 129, 200, 255} {
+		_, found := reply.Headers[key]
+		assert.False(t, found, "header %v should not be reflected", key)
+	}
+}
+
+func Test_ReplyToWithoutReflectedHeaderAddsNothing(t *testing.T) {
+	req := NewMessage(1, nil)
+	req.sequence = 7
+
+	reply := NewMessage(2, nil)
+	reply.ReplyTo(req)
+
+	assert.True(t, reply.IsReplyingTo(7))
+	_, found := reply.Headers[ReflectedHeader]
+	assert.False(t, found, "no reflected header should be added when the request had none")
+}
