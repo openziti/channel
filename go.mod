@@ -10,9 +10,9 @@ require (
 	github.com/openziti/identity v1.0.140
 	github.com/openziti/transport/v2 v2.0.220
 	github.com/pkg/errors v0.9.1
-	github.com/sirupsen/logrus v1.9.4
+	github.com/sirupsen/logrus v1.10.0
 	github.com/stretchr/testify v1.12.0
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
