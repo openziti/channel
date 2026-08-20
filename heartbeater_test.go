@@ -2,11 +2,12 @@ package channel
 
 import (
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/stretchr/testify/require"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/michaelquigley/pfxlog"
+	"github.com/stretchr/testify/require"
 )
 
 // A simple test to check for failure of alignment on atomic operations for 64 bit variables in a struct
@@ -315,4 +316,56 @@ func (self *heartbeatTracker) CheckHeartBeat() {
 
 func (self *heartbeatTracker) HeartbeatReceived(*Message, Channel) {
 	fmt.Printf("%v: received heartbeat message\n", self.id)
+}
+
+func TestLoadHeartbeatOptions(t *testing.T) {
+	t.Run("defaults apply when nothing is set", func(t *testing.T) {
+		req := require.New(t)
+		options, err := LoadHeartbeatOptions(map[interface{}]interface{}{})
+		req.NoError(err)
+		req.Equal(DefaultHeartbeatSendInterval, options.SendInterval)
+		req.Equal(DefaultHeartbeatCheckInterval, options.CheckInterval)
+		req.Equal(DefaultHeartbeatTimeout, options.CloseUnresponsiveTimeout)
+	})
+
+	t.Run("each value lands in its own field", func(t *testing.T) {
+		req := require.New(t)
+		options, err := LoadHeartbeatOptions(map[interface{}]interface{}{
+			"sendInterval":             "3s",
+			"checkInterval":            "4s",
+			"closeUnresponsiveTimeout": "5s",
+		})
+		req.NoError(err)
+		req.Equal(3*time.Second, options.SendInterval)
+		req.Equal(4*time.Second, options.CheckInterval)
+		req.Equal(5*time.Second, options.CloseUnresponsiveTimeout)
+	})
+
+	t.Run("closeUnresponsiveTimeout does not disturb checkInterval", func(t *testing.T) {
+		req := require.New(t)
+		options, err := LoadHeartbeatOptions(map[interface{}]interface{}{
+			"closeUnresponsiveTimeout": "90s",
+		})
+		req.NoError(err)
+		req.Equal(90*time.Second, options.CloseUnresponsiveTimeout)
+		req.Equal(DefaultHeartbeatCheckInterval, options.CheckInterval)
+	})
+
+	t.Run("a zero closeUnresponsiveTimeout is preserved", func(t *testing.T) {
+		req := require.New(t)
+		options, err := LoadHeartbeatOptions(map[interface{}]interface{}{
+			"closeUnresponsiveTimeout": "0s",
+		})
+		req.NoError(err)
+		req.Equal(time.Duration(0), options.CloseUnresponsiveTimeout)
+		req.Equal(DefaultHeartbeatCheckInterval, options.CheckInterval)
+	})
+
+	t.Run("an unparseable value is an error", func(t *testing.T) {
+		req := require.New(t)
+		_, err := LoadHeartbeatOptions(map[interface{}]interface{}{
+			"closeUnresponsiveTimeout": "not-a-duration",
+		})
+		req.Error(err)
+	})
 }
