@@ -17,7 +17,6 @@
 package channel
 
 import (
-	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/transport/v2"
 )
 
@@ -35,8 +34,8 @@ func NewWSListener(peer transport.Conn) *wsListener {
 }
 
 func (listener *wsListener) Respond(request *Message, success bool, body []byte) error {
-	log := pfxlog.ContextLogger(listener.Impl.Label())
-	log.Debug("Respond entered")
+	log := For("channel.listener").With("context", listener.Impl.Label())
+	log.Debug("respond entered")
 
 	response := NewMessage(ContentTypeResultType, body)
 	response.PutBoolHeader(ResultSuccessHeader, success)
@@ -45,7 +44,7 @@ func (listener *wsListener) Respond(request *Message, success bool, body []byte)
 
 	response.ReplyTo(request)
 
-	log.Debugf("response: %v", response)
+	log.Debug("response", "response", response)
 
 	return listener.Impl.Tx(response)
 }

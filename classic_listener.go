@@ -18,16 +18,15 @@ package channel
 
 import (
 	"fmt"
+	"io"
+	"sync/atomic"
+	"time"
+
 	"github.com/google/uuid"
-	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/goroutines"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
-	"io"
-	"sync/atomic"
-	"time"
 )
 
 type classicListener struct {
@@ -75,10 +74,10 @@ func newClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 		MaxWorkers: uint32(config.MaxOutstandingConnects),
 		IdleTime:   10 * time.Second,
 		PanicHandler: func(err interface{}) {
-			pfxlog.Logger().
-				WithField("id", identity.Token).
-				WithField("endpoint", endpoint.String()).
-				WithField(logrus.ErrorKey, err).Error("panic during channel accept")
+			For("channel.listener").
+				With("id", identity.Token,
+					"endpoint", endpoint.String(),
+					"error", err).Error("panic during channel accept")
 		},
 	}
 
@@ -90,7 +89,7 @@ func newClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 
 	pool, err := goroutines.NewPool(poolConfig)
 	if err != nil {
-		logrus.WithError(err).Error("failed to initial channel listener pool")
+		For("channel.listener").Error("failed to initial channel listener pool", "error", err)
 		panic(err)
 	}
 
@@ -144,7 +143,7 @@ func NewClassicListener(identity *identity.TokenId, endpoint transport.Address, 
 		select {
 		case listener.created <- underlay:
 		case <-listener.close:
-			pfxlog.Logger().WithField("underlay", underlay.Label()).Info("channel closed, can't notify of new connection")
+			For("channel.listener").With("underlay", underlay.Label()).Info("channel closed, can't notify of new connection")
 			return
 		}
 	})
@@ -190,19 +189,19 @@ func (self *classicListener) Create(_ time.Duration) (Underlay, error) {
 }
 
 func (self *classicListener) acceptConnection(peer transport.Conn) {
-	log := pfxlog.ContextLogger(self.endpoint.String())
+	log := For("channel.listener").With("context", self.endpoint.String())
 	err := self.listenerPool.Queue(func() {
 		impl := self.underlayFactory(self.messageStrategy, peer, 2)
 
 		if err := peer.SetDeadline(time.Now().Add(self.connectOptions.ConnectTimeout)); err != nil {
-			log.Errorf("could not set connection deadline for [%s] (%v)", peer.Detail().Address, err)
+			log.Error("could not set connection deadline", "address", peer.Detail().Address, "error", err)
 			_ = peer.Close()
 			return
 		}
 
 		defer func() {
 			if err := peer.SetDeadline(time.Time{}); err != nil {
-				log.Errorf("could not clear connection deadline for [%s] (%v)", peer.Detail().Address, err)
+				log.Error("could not clear connection deadline", "address", peer.Detail().Address, "error", err)
 				_ = peer.Close()
 				return
 			}
@@ -211,7 +210,7 @@ func (self *classicListener) acceptConnection(peer transport.Conn) {
 		request, hello, err := self.receiveHello(impl)
 		if err != nil {
 			_ = peer.Close()
-			log.Errorf("error receiving hello from [%s] (%v)", peer.Detail().Address, err)
+			log.Error("error receiving hello", "address", peer.Detail().Address, "error", err)
 			return
 		}
 
@@ -222,7 +221,7 @@ func (self *classicListener) acceptConnection(peer transport.Conn) {
 		}
 
 		if err != nil {
-			log.Errorf("connection handler error for [%s] (%v)", peer.Detail().Address, err)
+			log.Error("connection handler error", "address", peer.Detail().Address, "error", err)
 			_ = peer.Close()
 			return
 		}
@@ -254,12 +253,12 @@ func (self *classicListener) acceptConnection(peer transport.Conn) {
 		})
 	})
 	if err != nil {
-		log.WithError(err).Error("failed to queue connection accept")
+		log.Error("failed to queue connection accept", "error", err)
 	}
 }
 
 func (self *classicListener) receiveHello(impl classicUnderlay) (*Message, *Hello, error) {
-	log := pfxlog.ContextLogger(impl.Label())
+	log := For("channel.listener").With("context", impl.Label())
 	log.Debug("started")
 	defer log.Debug("exited")
 

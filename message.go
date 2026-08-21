@@ -24,7 +24,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/michaelquigley/pfxlog"
 	"github.com/pkg/errors"
 )
 
@@ -102,7 +101,7 @@ func (header *MessageHeader) cacheReplyFor() {
 		replyFor, found := header.Headers[ReplyForHeader]
 		if found {
 			if len(replyFor) != 4 {
-				pfxlog.Logger().Warnf("incorrect replyFor encoding. length should be 4 not %v", len(replyFor))
+				For("channel.message").Warn("incorrect replyFor encoding, length should be 4", "length", len(replyFor))
 			} else {
 				val := int32(binary.LittleEndian.Uint32(replyFor))
 				header.replyFor = &val
@@ -505,8 +504,8 @@ func ReadV2(peer io.Reader) (*Message, error) {
 	}
 
 	if !bytes.Equal(messageSection[0:magicLength], magicV2) {
-		log := pfxlog.Logger()
-		log.Debugf("received message version bytes: %v", messageSection[:magicLength])
+		log := For("channel.message")
+		log.Debug("received message version bytes", "bytes", messageSection[:magicLength])
 		if bytes.Equal(messageSection[0:magicLength], magicUnknownVersion) {
 			log.Debug("message appears to be unknown version response")
 			return nil, readUnknownVersionResponse(messageSection[magicLength:read], peer)
@@ -686,16 +685,16 @@ func WriteUnknownVersionResponse(writer io.Writer) {
 
 	for _, val := range []uint32{2, 1, 2} { // 2 versions being sent, version 1 and version 2
 		if err := binary.Write(data, binary.LittleEndian, val); err != nil {
-			pfxlog.Logger().WithError(err).Warnf("Unable to write value to bytes.Buffer")
+			For("channel.message").Warn("unable to write value to bytes.Buffer", "error", err)
 			return
 		}
 	}
 
 	written, err := writer.Write(data.Bytes())
 	if err != nil {
-		pfxlog.Logger().WithError(err).Warnf("Unable to write unknown message version response")
+		For("channel.message").Warn("unable to write unknown message version response", "error", err)
 	} else if written != data.Len() {
-		pfxlog.Logger().Warnf("Short write while writing unknown message version response")
+		For("channel.message").Warn("short write while writing unknown message version response")
 	}
 }
 
@@ -703,12 +702,12 @@ func WriteUnknownVersionResponse(writer io.Writer) {
 // consumed the response's magic. initial holds however much of the rest arrived alongside the
 // magic, which may be none of it; whatever is missing is read from reader.
 func readUnknownVersionResponse(initial []byte, reader io.Reader) error {
-	log := pfxlog.Logger()
+	log := For("channel.message")
 	response := io.MultiReader(bytes.NewReader(initial), reader)
 
 	countBuf := make([]byte, versionLen)
 	if _, err := io.ReadFull(response, countBuf); err != nil {
-		log.WithError(err).Debug("didn't receive enough bytes for an unknown version response")
+		log.Debug("didn't receive enough bytes for an unknown version response", "error", err)
 		return errors.New("channel synchronization")
 	}
 
@@ -717,13 +716,13 @@ func readUnknownVersionResponse(initial []byte, reader io.Reader) error {
 	// allocation before anything has been verified. Bound it well above any plausible number of
 	// protocol versions.
 	if versionCount > maxSupportedVersionCount {
-		log.Debugf("unknown version response claims an implausible %v versions", versionCount)
+		log.Debug("unknown version response claims an implausible number of versions", "count", versionCount)
 		return errors.New("channel synchronization")
 	}
 
 	versionsBuf := make([]byte, versionCount*versionLen)
 	if _, err := io.ReadFull(response, versionsBuf); err != nil {
-		log.WithError(err).Debugf("unable to read all %v versions for unknown version response", versionCount)
+		log.Debug("unable to read all versions for unknown version response", "count", versionCount, "error", err)
 		return errors.New("channel synchronization")
 	}
 
@@ -743,20 +742,20 @@ func GetRetryVersion(err error) (uint32, bool) {
 
 func getRetryVersionFor(err error, defaultVersion uint32, localVersions ...uint32) (uint32, bool) {
 	versionErr, ok := err.(UnsupportedVersionError)
-	log := pfxlog.Logger()
+	log := For("channel.message")
 	if ok && len(versionErr.supportedVersions) > 0 {
 		log.Info("received unsupported version response from server")
 		for _, version := range localVersions {
 			for _, remoteVersion := range versionErr.supportedVersions {
 				if remoteVersion == version {
-					log.Infof("using highest supported version %v", version)
+					log.Info("using highest supported version", "version", version)
 					return version, true
 				}
 			}
 		}
 	}
 
-	log.Infof("defaulting to version %v", defaultVersion)
+	log.Info("defaulting to version", "version", defaultVersion)
 	return defaultVersion, false
 }
 

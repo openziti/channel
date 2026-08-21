@@ -18,11 +18,11 @@ package channel
 
 import (
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/identity"
-	"github.com/pkg/errors"
 	"net"
 	"time"
+
+	"github.com/openziti/identity"
+	"github.com/pkg/errors"
 )
 
 type existingConnListener struct {
@@ -41,7 +41,7 @@ func NewExistingConnListener(identity *identity.TokenId, peer net.Conn, headers 
 }
 
 func (self *existingConnListener) Create(timeout time.Duration) (Underlay, error) {
-	log := pfxlog.Logger()
+	log := For("channel.listener")
 
 	impl := newExistingImpl(self.peer, 2)
 	connectionId, err := NextConnectionId()
@@ -53,7 +53,7 @@ func (self *existingConnListener) Create(timeout time.Duration) (Underlay, error
 	if timeout > 0 {
 		defer func() {
 			if err = self.peer.SetDeadline(time.Time{}); err != nil {
-				log.WithError(err).Error("unable to clear deadline on conn after create")
+				log.Error("unable to clear deadline on conn after create", "error", err)
 			}
 		}()
 
@@ -78,7 +78,7 @@ func (self *existingConnListener) Create(timeout time.Duration) (Underlay, error
 }
 
 func (self *existingConnListener) receiveHello(impl *existingConnImpl) (*Message, *Hello, error) {
-	log := pfxlog.ContextLogger(impl.Label())
+	log := For("channel.listener").With("context", impl.Label())
 	log.Debug("started")
 	defer log.Debug("exited")
 

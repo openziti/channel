@@ -18,6 +18,7 @@ package channel
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -29,7 +30,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/foundation/v2/concurrenz"
 	"github.com/openziti/foundation/v2/info"
 	"github.com/openziti/foundation/v2/sequence"
@@ -151,11 +151,18 @@ func (self *waiterMap) RemoveWaiter(seq int32) ReplyReceiver {
 
 func (self *waiterMap) reapExpired(now int64) {
 	var deleteCount int32
+	log := For("channel.impl")
 	self.m.Range(func(key, value interface{}) bool {
-		if w, ok := value.(*waiter); !ok || w.ttlMs < now {
+		w, ok := value.(*waiter)
+		if !ok {
+			// Reaped without logging w: it is nil here, so reporting its ttl would panic.
 			self.m.Delete(key)
 			deleteCount++
-			pfxlog.Logger().Debugf("removed waiter for %v. ttl: %v, now: %v", key, w.ttlMs, now)
+			log.Debug("removed waiter of unexpected type", "key", key)
+		} else if w.ttlMs < now {
+			self.m.Delete(key)
+			deleteCount++
+			log.Debug("removed waiter", "key", key, "ttl", w.ttlMs, "now", now)
 		}
 		return true
 	})
@@ -199,10 +206,12 @@ type channelImpl struct {
 	validUnderlayTypes    []string
 	applyInProgress       atomic.Bool
 
-	// eventLog is the slog.Logger used for this channel's lifecycle events. It
-	// is resolved once at creation so per-event logging needs no synchronization
-	// or package-global access.
-	eventLog *slog.Logger
+	// log is this channel's logger, used both for its lifecycle events and for
+	// its instance-scoped internal logging. It is resolved once at creation from
+	// Options.Logger / the SetLoggerFor resolver, so an embedder's per-channel
+	// logger governs all of this channel's logs (not just its events) and logging
+	// needs no synchronization or package-global access.
+	log *slog.Logger
 
 	lock      sync.Mutex
 	underlays *Underlays
@@ -244,11 +253,11 @@ func NewChannel(config *Config) (Channel, error) {
 	impl.ownerId = config.Underlay.Id()
 	impl.fallbackUnderlay.Store(&config.Underlay)
 
-	// Resolve this channel's event logger before registering listeners or binding:
-	// a bind handler can reach the channel via Binding.GetChannel() and call
-	// AcceptUnderlay, which fires UnderlayAdded and reads impl.eventLog. Caching it
-	// here keeps per-event logging free of locks and package-global access.
-	impl.eventLog = resolveEventLogger(impl.options, impl.logicalName, getLoggerFor())
+	// Resolve this channel's logger before registering listeners or binding: a
+	// bind handler can reach the channel via Binding.GetChannel() and call
+	// AcceptUnderlay, which fires UnderlayAdded and reads impl.log. Caching it
+	// here keeps logging free of locks and package-global access.
+	impl.log = resolveEventLogger(impl.options, impl.logicalName, getLoggerFor())
 
 	// The group secret matches reconnecting or additional underlays to this channel, so it is
 	// only required for channels that can grow: those with a dial policy (which dials more
@@ -271,11 +280,11 @@ func NewChannel(config *Config) (Channel, error) {
 
 	if err := config.Binder.bind(impl); err != nil {
 		if closeErr := impl.Close(); closeErr != nil {
-			pfxlog.ContextLogger(impl.Label()).WithError(closeErr).Warn("error closing channel after bind failure")
+			impl.log.With("context", impl.Label()).Warn("error closing channel after bind failure", "error", closeErr)
 		}
 		if closeErr := config.Underlay.Close(); closeErr != nil {
 			if !errors.Is(closeErr, net.ErrClosed) {
-				pfxlog.ContextLogger(impl.Label()).WithError(closeErr).Warn("error closing underlay")
+				impl.log.With("context", impl.Label()).Warn("error closing underlay", "error", closeErr)
 			}
 		}
 		return nil, err
@@ -381,7 +390,7 @@ func (self *channelImpl) AcceptUnderlay(underlay Underlay) error {
 	// underlay.
 	if !self.isMultiUnderlayCapable() {
 		if err := underlay.Close(); err != nil {
-			pfxlog.ContextLogger(self.Label()).WithError(err).Error("error closing underlay")
+			self.log.With("context", self.Label()).Error("error closing underlay", "error", err)
 		}
 		return fmt.Errorf("new underlay for '%s' not accepted: channel does not accept additional underlays", self.ConnectionId())
 	}
@@ -389,21 +398,21 @@ func (self *channelImpl) AcceptUnderlay(underlay Underlay) error {
 	groupSecret := underlay.Headers()[GroupSecretHeader]
 	if !bytes.Equal(groupSecret, self.groupSecret) {
 		if err := underlay.Close(); err != nil {
-			pfxlog.ContextLogger(self.Label()).WithError(err).Error("error closing underlay")
+			self.log.With("context", self.Label()).Error("error closing underlay", "error", err)
 		}
 		return fmt.Errorf("new underlay for '%s' not accepted: incorrect group secret", self.ConnectionId())
 	}
 
 	if self.IsClosed() {
 		if err := underlay.Close(); err != nil {
-			pfxlog.ContextLogger(self.Label()).WithError(err).Error("error closing underlay")
+			self.log.With("context", self.Label()).Error("error closing underlay", "error", err)
 		}
 		return fmt.Errorf("new underlay for '%s' not accepted: channel is closed", self.ConnectionId())
 	}
 
 	if underlay.Id() != self.ownerId {
-		pfxlog.ContextLogger(self.Label()).
-			Warnf("new underlay has different id [%s] than channel owner [%s]", underlay.Id(), self.ownerId)
+		self.log.With("context", self.Label()).
+			Warn("new underlay has different id than channel owner", "id", underlay.Id(), "ownerId", self.ownerId)
 	}
 
 	self.fallbackUnderlay.Store(&underlay)
@@ -481,7 +490,7 @@ func (self *channelImpl) Close() error {
 	defer self.lock.Unlock()
 
 	if self.flags.CompareAndSet(flagClosed, false, true) {
-		pfxlog.ContextLogger(self.Label()).Debug("closing channel")
+		self.log.With("context", self.Label()).Debug("closing channel")
 
 		close(self.closeNotify)
 
@@ -494,7 +503,7 @@ func (self *channelImpl) Close() error {
 				closeHandler.HandleClose(self)
 			}
 		} else {
-			pfxlog.ContextLogger(self.Label()).Debug("no close handlers")
+			self.log.With("context", self.Label()).Debug("no close handlers")
 		}
 
 		self.waiters.clear()
@@ -521,8 +530,6 @@ func (self *channelImpl) Underlay() Underlay {
 }
 
 func (self *channelImpl) rx(m *Message) {
-	log := pfxlog.ContextLogger(self.Label())
-
 	now := info.NowInMilliseconds()
 	atomic.StoreInt64(&self.lastRead, now)
 
@@ -541,11 +548,15 @@ func (self *channelImpl) rx(m *Message) {
 		}
 		replyFor := m.ReplyFor()
 		if replyReceiver := self.waiters.RemoveWaiter(replyFor); replyReceiver != nil {
-			log.Tracef("waiter found for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
+			// Guarded rather than logged unconditionally: this is once per reply
+			// message, and Label() is two Sprintfs before the level is consulted.
+			if log := self.log; log.Enabled(context.Background(), LevelTrace) {
+				log.With("context", self.Label()).Log(context.Background(), LevelTrace, "waiter found for message", "type", m.ContentType, "sequence", m.sequence, "replyFor", replyFor)
+			}
 			replyReceiver.AcceptReply(m)
 			handled = true
 		} else {
-			log.Debugf("no waiter for message. type [%v], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, replyFor)
+			self.log.With("context", self.Label()).Debug("no waiter for message", "type", m.ContentType, "sequence", m.sequence, "replyFor", replyFor)
 		}
 	}
 
@@ -555,14 +566,12 @@ func (self *channelImpl) rx(m *Message) {
 		} else if anyHandler, found := self.receiveHandlers[AnyContentType]; found {
 			anyHandler(m, self)
 		} else {
-			log.Warnf("dropped message. type [%d], sequence [%v], replyFor [%v]", m.ContentType, m.sequence, m.ReplyFor())
+			self.log.With("context", self.Label()).Warn("dropped message", "type", m.ContentType, "sequence", m.sequence, "replyFor", m.ReplyFor())
 		}
 	}
 }
 
 func (self *channelImpl) tx(underlay Underlay, underlayType string, sendable Sendable, writeTimeout time.Duration) error {
-	log := pfxlog.ContextLogger(self.Label())
-
 	sendListener := sendable.SendListener()
 	m := sendable.Msg()
 
@@ -586,7 +595,7 @@ func (self *channelImpl) tx(underlay Underlay, underlayType string, sendable Sen
 	var err error
 	if writeTimeout > 0 {
 		if err = underlay.SetWriteTimeout(writeTimeout); err != nil {
-			log.WithError(err).Errorf("unable to set write timeout")
+			self.log.With("context", self.Label()).Error("unable to set write timeout", "error", err)
 			sendListener.NotifyErr(err)
 			return err
 		}
@@ -595,7 +604,7 @@ func (self *channelImpl) tx(underlay Underlay, underlayType string, sendable Sen
 	err = underlay.Tx(m)
 
 	if err != nil {
-		log.WithError(err).Errorf("write error")
+		self.log.With("context", self.Label()).Error("write error", "error", err)
 		self.waiters.RemoveWaiter(m.sequence)
 
 		for _, errorHandler := range self.errorHandlers {
@@ -622,7 +631,7 @@ func (self *channelImpl) tx(underlay Underlay, underlayType string, sendable Sen
 
 func (self *channelImpl) closeUnderlay(underlay Underlay, notifier *CloseNotifier) {
 	if err := underlay.Close(); err != nil {
-		pfxlog.Logger().WithField("context", self.Label()).WithError(err).Error("error closing underlay")
+		self.log.With("context", self.Label()).Error("error closing underlay", "error", err)
 	}
 
 	notifier.NotifyClosed()
@@ -645,7 +654,7 @@ func (self *channelImpl) GetTimeSinceLastRead() time.Duration {
 func (self *channelImpl) txer(underlay Underlay, notifier *CloseNotifier) {
 	defer self.closeUnderlay(underlay, notifier)
 
-	log := pfxlog.ContextLogger(self.Label())
+	log := self.log.With("context", self.Label())
 
 	var writeTimeout time.Duration
 	if options := self.options; options != nil {
@@ -663,9 +672,9 @@ func (self *channelImpl) txer(underlay Underlay, notifier *CloseNotifier) {
 
 		if err = self.tx(underlay, underlayType, sendable, writeTimeout); err != nil {
 			if self.IsClosed() {
-				log.WithError(err).Debug("tx error")
+				log.Debug("tx error", "error", err)
 			} else {
-				log.WithError(err).Error("tx error")
+				log.Error("tx error", "error", err)
 			}
 			return
 		}
@@ -675,7 +684,7 @@ func (self *channelImpl) txer(underlay Underlay, notifier *CloseNotifier) {
 func (self *channelImpl) rxer(underlay Underlay, notifier *CloseNotifier) {
 	defer self.closeUnderlay(underlay, notifier)
 
-	log := pfxlog.ContextLogger(self.Label())
+	log := self.log.With("context", self.Label())
 	log.Debug("started")
 	defer log.Debug("exited")
 
@@ -686,11 +695,11 @@ func (self *channelImpl) rxer(underlay Underlay, notifier *CloseNotifier) {
 		m, err := underlay.Rx()
 		if err != nil {
 			if err == io.EOF {
-				log.WithError(err).Debug("EOF")
+				log.Debug("EOF", "error", err)
 			} else if self.IsClosed() {
-				log.WithError(err).Debug("rx error")
+				log.Debug("rx error", "error", err)
 			} else {
-				log.WithError(err).Error("rx error")
+				log.Error("rx error", "error", err)
 			}
 			return
 		}
@@ -704,7 +713,7 @@ func (self *channelImpl) rxer(underlay Underlay, notifier *CloseNotifier) {
 
 // UnderlayAdded implements UnderlayEventListener. Logs the event.
 func (self *channelImpl) UnderlayAdded(ch Channel, underlay Underlay) {
-	self.eventLog.Info("underlay added",
+	self.log.Info("underlay added",
 		"id", ch.Label(),
 		"underlays", ch.GetUnderlayCountsByType(),
 		"underlayType", GetUnderlayType(underlay),
@@ -716,7 +725,7 @@ func (self *channelImpl) UnderlayAdded(ch Channel, underlay Underlay) {
 func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay) {
 	lifetime := time.Since(underlay.CreatedAt())
 
-	self.eventLog.Info("underlay removed",
+	self.log.Info("underlay removed",
 		"id", ch.Label(),
 		"underlays", ch.GetUnderlayCountsByType(),
 		"underlayType", GetUnderlayType(underlay),
@@ -732,7 +741,7 @@ func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay) {
 		// underlay loss. If no underlays remain, close the channel.
 		if len(self.underlays.GetAll()) == 0 {
 			if err := self.Close(); err != nil {
-				pfxlog.Logger().WithError(err).Error("error closing channel after last underlay removed")
+				self.log.Error("error closing channel after last underlay removed", "error", err)
 			}
 		}
 		return
@@ -766,7 +775,7 @@ func (self *channelImpl) applyConstraints() {
 		return
 	}
 
-	log := pfxlog.Logger().WithField("conn", self.Label())
+	log := self.log.With("conn", self.Label())
 	log.Debug("starting constraint check")
 
 	defer func() {
@@ -793,12 +802,12 @@ func (self *channelImpl) applyConstraints() {
 
 		allSatisfied := true
 		for underlayType, constraint := range self.constraints {
-			log.WithField("underlayType", underlayType).
-				WithField("numDesired", constraint.Desired).
-				WithField("current", counts[underlayType]).
+			log.With("underlayType", underlayType,
+				"numDesired", constraint.Desired,
+				"current", counts[underlayType]).
 				Debug("checking constraint")
 			if constraint.Desired > counts[underlayType] {
-				log.WithField("underlayType", underlayType).
+				log.With("underlayType", underlayType).
 					Info("additional connections desired, dialing...")
 
 				allSatisfied = false
@@ -834,13 +843,15 @@ func (self *channelImpl) countsShowValidState(counts map[string]int, closeIfInva
 	for underlayType, constraint := range self.constraints {
 		if constraint.Min > counts[underlayType] {
 			if closeIfInvalid {
-				pfxlog.Logger().WithField("conn", self.LogicalName()).
-					WithField("channelId", self.ConnectionId()).
-					WithField("label", self.Label()).
-					WithField("underlays", counts).
-					Infof("not enough open underlays of type '%s', closing channel", underlayType)
+				self.log.
+					With("conn", self.LogicalName(),
+						"channelId", self.ConnectionId(),
+						"label", self.Label(),
+						"underlays", counts,
+						"underlayType", underlayType).
+					Info("not enough open underlays of type, closing channel")
 				if err := self.Close(); err != nil {
-					pfxlog.Logger().WithError(err).Error("error closing underlay")
+					self.log.Error("error closing underlay", "error", err)
 				}
 			}
 			return false
@@ -854,13 +865,14 @@ func (self *channelImpl) countsShowValidState(counts map[string]int, closeIfInva
 
 	if totalCount < self.minTotalUnderlays {
 		if closeIfInvalid {
-			pfxlog.Logger().WithField("conn", self.LogicalName()).
-				WithField("channelId", self.ConnectionId()).
-				WithField("label", self.Label()).
-				WithField("underlays", counts).
+			self.log.
+				With("conn", self.LogicalName(),
+					"channelId", self.ConnectionId(),
+					"label", self.Label(),
+					"underlays", counts).
 				Info("not enough total open underlays, closing channel")
 			if err := self.Close(); err != nil {
-				pfxlog.Logger().WithError(err).Error("error closing channel")
+				self.log.Error("error closing channel", "error", err)
 			}
 		}
 		return false
@@ -870,7 +882,7 @@ func (self *channelImpl) countsShowValidState(counts map[string]int, closeIfInva
 }
 
 func (self *channelImpl) dialUnderlay(underlayType string) {
-	log := pfxlog.ContextLogger(self.Label()).WithField("underlayType", underlayType)
+	log := self.log.With("context", self.Label()).With("underlayType", underlayType)
 
 	connectTimeout := DefaultConnectTimeout
 	if self.options != nil && self.options.ConnectTimeout > 0 {
@@ -887,13 +899,13 @@ func (self *channelImpl) dialUnderlay(underlayType string) {
 		if self.IsClosed() {
 			log.Debug("dial cancelled, channel closed")
 		} else {
-			log.WithError(err).Error("dial of new underlay failed")
+			log.Error("dial of new underlay failed", "error", err)
 		}
 		return
 	}
 
 	if err = self.AcceptUnderlay(underlay); err != nil {
-		log.WithError(err).Error("accepting dialed underlay failed")
+		log.Error("accepting dialed underlay failed", "error", err)
 	}
 }
 

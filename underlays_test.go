@@ -17,6 +17,7 @@
 package channel
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -195,6 +196,7 @@ func (l *testUnderlayListenerF) UnderlayRemoved(ch Channel, u Underlay) {
 // fill / dial backoff is already running, rather than waiting for that dial to return.
 func Test_applyConstraints_ClosesBelowMinEvenWhenApplyInProgress(t *testing.T) {
 	impl := &channelImpl{
+		log:         slog.Default(),
 		constraints: map[string]UnderlayConstraint{"default": {Desired: 1, Min: 1}},
 		underlays:   NewUnderlays(),
 		closeNotify: make(chan struct{}),
@@ -230,6 +232,7 @@ func Test_isMultiUnderlayCapable_MinTotalUnderlays(t *testing.T) {
 // relies on when it uses MinTotalUnderlays as its sole multi-underlay signal.
 func Test_applyConstraints_ClosesBelowMinTotalWithoutConstraints(t *testing.T) {
 	impl := &channelImpl{
+		log:               slog.Default(),
 		minTotalUnderlays: 1,
 		underlays:         NewUnderlays(),
 		closeNotify:       make(chan struct{}),

@@ -21,8 +21,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/michaelquigley/pfxlog"
 )
 
 // Factory creates a new multi-underlay Channel from the first incoming underlay.
@@ -105,21 +103,21 @@ type MultiListenerConfig struct {
 func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() error) {
 	isGrouped, _ := Headers(underlay.Headers()).GetBoolHeader(IsGroupedHeader)
 
-	log := pfxlog.Logger().
-		WithField("underlayId", underlay.ConnectionId()).
-		WithField("underlayType", GetUnderlayType(underlay)).
-		WithField("isGrouped", isGrouped)
+	log := For("channel.listener").
+		With("underlayId", underlay.ConnectionId(),
+			"underlayType", GetUnderlayType(underlay),
+			"isGrouped", isGrouped)
 
 	if !isGrouped {
 		if err := ackHello(); err != nil {
-			log.WithError(err).Error("error acknowledging hello")
+			log.Error("error acknowledging hello", "error", err)
 			_ = underlay.Close()
 			return
 		}
 		if err := self.ungroupedChannelFallback(underlay); err != nil {
-			log.WithError(err).Error("failed to create channel")
+			log.Error("failed to create channel", "error", err)
 			if closeErr := underlay.Close(); closeErr != nil {
-				log.WithError(closeErr).Error("error closing underlay")
+				log.Error("error closing underlay", "error", closeErr)
 			}
 		}
 		return
@@ -173,7 +171,7 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 				}
 				log.Info("no existing channel found for non-first underlay, closing connection")
 				if err := underlay.Close(); err != nil {
-					log.WithError(err).Error("error closing underlay")
+					log.Error("error closing underlay", "error", err)
 				}
 				return
 			}
@@ -193,7 +191,7 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 				// close the underlay and hope it comes in with a new id
 				log.Warn("timed out waiting for concurrent channel create on same id")
 				if err := underlay.Close(); err != nil {
-					log.WithError(err).Error("error closing underlay")
+					log.Error("error closing underlay", "error", err)
 				}
 				return
 			}
@@ -208,10 +206,10 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 	// group wait on the reservation meanwhile, as they do for the Factory.
 	if createLockNotifier != nil && self.admitter != nil {
 		if err := self.admitter(underlay); err != nil {
-			log.WithError(err).Debug("channel not admitted, rejecting hello")
+			log.Debug("channel not admitted, rejecting hello", "error", err)
 			self.releaseReservation(chId, createLockNotifier)
 			if rejectErr := RejectHello(underlay, err); rejectErr != nil {
-				log.WithError(rejectErr).Error("error rejecting underlay")
+				log.Error("error rejecting underlay", "error", rejectErr)
 			}
 			return
 		}
@@ -221,7 +219,7 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 	// notifier). Acknowledge the hello: this releases the dialer to dial subsequent
 	// underlays, which will now find the group rather than racing its creation.
 	if err := ackHello(); err != nil {
-		log.WithError(err).Error("error acknowledging hello")
+		log.Error("error acknowledging hello", "error", err)
 		if createLockNotifier != nil {
 			self.releaseReservation(chId, createLockNotifier)
 		}
@@ -236,7 +234,7 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 	if channelExists {
 		log.Info("found existing channel for underlay")
 		if err := ch.AcceptUnderlay(underlay); err != nil {
-			log.WithError(err).Error("error accepting underlay")
+			log.Error("error accepting underlay", "error", err)
 		}
 	} else {
 		log.Info("no existing channel found for underlay")
@@ -254,9 +252,9 @@ func (self *MultiListener) AcceptUnderlay(underlay Underlay, ackHello func() err
 		}
 
 		if err != nil {
-			log.WithError(err).Error("failed to create multi-underlay channel")
+			log.Error("failed to create multi-underlay channel", "error", err)
 			if closeErr := underlay.Close(); closeErr != nil {
-				log.WithError(closeErr).Error("error closing underlay")
+				log.Error("error closing underlay", "error", closeErr)
 			}
 		} else {
 			// Populate the registration before publishing it, so a lookup can never observe

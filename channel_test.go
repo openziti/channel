@@ -28,7 +28,6 @@ import (
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2/tcp"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
 
@@ -395,7 +394,7 @@ func (self *testServer) accept() {
 
 		ch, err := NewSingleChannel(fmt.Sprintf("test-server-%v", counter), self.listener, BindHandlerF(bindHandler), self.options)
 		if err != nil {
-			logrus.WithError(err).Error("test listener error, exiting")
+			For("channel.test").Error("test listener error, exiting", "error", err)
 			return
 		}
 		if self.acceptHandler != nil {
@@ -408,7 +407,7 @@ func (self *testServer) echoPings(msg *Message, ch Channel) {
 	reply := NewResult(true, string(msg.Body))
 	reply.ReplyTo(msg)
 	if err := ch.Send(reply); err != nil {
-		logrus.WithError(err).WithField("reqSeq", msg.Sequence()).Error("error responding to request")
+		For("channel.test").With("reqSeq", msg.Sequence()).Error("error responding to request", "error", err)
 	}
 }
 
@@ -417,7 +416,7 @@ func (self *testServer) echoPingsWithDelay(msg *Message, ch Channel) {
 	reply := NewResult(true, string(msg.Body))
 	reply.ReplyTo(msg)
 	if err := ch.Send(reply); err != nil {
-		logrus.WithError(err).WithField("reqSeq", msg.Sequence()).Error("error responding to request")
+		For("channel.test").With("reqSeq", msg.Sequence()).Error("error responding to request", "error", err)
 	}
 }
 

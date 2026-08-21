@@ -20,7 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/channel/v5"
 )
 
@@ -46,7 +45,7 @@ func (h *LatencyHandler) HandleReceive(msg *channel.Message, ch channel.Channel)
 			response := channel.NewResult(true, "")
 			response.ReplyTo(msg)
 			if err := response.Send(ch); err != nil {
-				pfxlog.ContextLogger(ch.Label()).WithError(err).Errorf("error sending latency response")
+				channel.For("channel.latency").With("context", ch.Label()).Error("error sending latency response", "error", err)
 			}
 		}()
 	} else {
@@ -65,7 +64,7 @@ type ProbeConfig struct {
 
 func ProbeLatencyConfigurable(config *ProbeConfig) {
 	ch := config.Channel
-	log := pfxlog.ContextLogger(ch.Label())
+	log := channel.For("channel.latency").With("context", ch.Label())
 	log.Debug("started")
 	defer log.Debug("exited")
 	defer func() {
@@ -84,9 +83,9 @@ func ProbeLatencyConfigurable(config *ProbeConfig) {
 		request.PutUint64Header(probeTime, uint64(time.Now().UnixNano()))
 		response, err := request.WithTimeout(config.Timeout).SendForReply(config.Channel)
 		if err != nil {
-			log.WithError(err).Error("unexpected error sending latency probe")
+			log.Error("unexpected error sending latency probe", "error", err)
 			if config.Channel.IsClosed() {
-				log.WithError(err).Info("latency probe channel closed, exiting")
+				log.Info("latency probe channel closed, exiting", "error", err)
 				return
 			}
 			if channel.IsTimeout(err) && config.TimeoutHandler != nil {
@@ -147,13 +146,13 @@ func (self *latencyProbe) HandleReceive(m *channel.Message, _ channel.Channel) {
 		latency := time.Duration(time.Now().UnixNano() - int64(sentTime))
 		self.handler(RoundTripType, latency)
 	} else {
-		pfxlog.Logger().Error("no send time on latency response")
+		channel.For("channel.latency").Error("no send time on latency response")
 	}
 }
 
 func (self *latencyProbe) run() {
 	if self.ch.IsClosed() {
-		pfxlog.ContextLogger(self.ch.Label()).Debug("exited")
+		channel.For("channel.latency").With("context", self.ch.Label()).Debug("exited")
 		return
 	}
 
@@ -170,7 +169,7 @@ func (self *latencyProbe) run() {
 		}
 	}
 	if err := self.ch.Send(sendable); err != nil {
-		pfxlog.ContextLogger(self.ch.Label()).WithError(err).Error("unexpected error sending latency probe")
+		channel.For("channel.latency").With("context", self.ch.Label()).Error("unexpected error sending latency probe", "error", err)
 		if self.ch.IsClosed() {
 			return
 		}
@@ -259,7 +258,7 @@ func (self *Responder) HandleReceive(msg *channel.Message, _ channel.Channel) {
 }
 
 func (self *Responder) responseSender() {
-	log := pfxlog.ContextLogger(self.ch.Label())
+	log := channel.For("channel.latency").With("context", self.ch.Label())
 	log.Debug("started")
 	defer log.Debug("exited")
 
@@ -270,7 +269,7 @@ func (self *Responder) responseSender() {
 		select {
 		case response := <-self.responseChannel:
 			if err := response.Send(self.ch); err != nil {
-				log.WithError(err).Error("error sending latency response")
+				log.Error("error sending latency response", "error", err)
 				if self.ch.IsClosed() {
 					return
 				}

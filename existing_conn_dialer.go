@@ -19,10 +19,10 @@ package channel
 import (
 	"errors"
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/identity"
 	"net"
 	"time"
+
+	"github.com/openziti/identity"
 )
 
 type existingConnDialer struct {
@@ -41,7 +41,7 @@ func NewExistingConnDialer(id *identity.TokenId, peer net.Conn, headers map[int3
 }
 
 func (self *existingConnDialer) Create(timeout time.Duration) (Underlay, error) {
-	log := pfxlog.Logger()
+	log := For("channel.dialer")
 	log.Debug("started")
 	defer log.Debug("exited")
 
@@ -50,7 +50,7 @@ func (self *existingConnDialer) Create(timeout time.Duration) (Underlay, error) 
 
 	defer func() {
 		if err := self.peer.SetDeadline(time.Time{}); err != nil { // clear write deadline
-			log.WithError(err).Error("unable to clear write deadline")
+			log.Error("unable to clear write deadline", "error", err)
 		}
 	}()
 
@@ -66,7 +66,7 @@ func (self *existingConnDialer) Create(timeout time.Duration) (Underlay, error) 
 			if tryCount > 0 {
 				return nil, err
 			} else {
-				log.WithError(err).Warnf("error initiating channel with hello")
+				log.Warn("error initiating channel with hello", "error", err)
 			}
 			tryCount++
 			if retryVersion, _ := GetRetryVersion(err); retryVersion != version {
@@ -75,7 +75,7 @@ func (self *existingConnDialer) Create(timeout time.Duration) (Underlay, error) 
 				return nil, err
 			}
 
-			log.Warnf("Retrying dial with protocol version %v", version)
+			log.Warn("retrying dial with protocol version", "version", version)
 			continue
 		}
 		impl.id = self.id
@@ -84,7 +84,7 @@ func (self *existingConnDialer) Create(timeout time.Duration) (Underlay, error) 
 }
 
 func (self *existingConnDialer) sendHello(impl *existingConnImpl) error {
-	log := pfxlog.ContextLogger(impl.Label())
+	log := For("channel.dialer").With("context", impl.Label())
 	defer log.Debug("exited")
 	log.Debug("started")
 

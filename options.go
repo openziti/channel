@@ -55,7 +55,7 @@ type Options struct {
 	// letting an owner give each channel (or channel type) its own logger and level
 	// control - e.g. an SDK context injecting its logger, or a router naming
 	// its link vs ctrl channels distinctly. When nil, the channel falls back
-	// to the SetLoggerFor resolver and then to the pfxlog default.
+	// to the SetLoggerFor resolver and then to the slog.Default()-backed default.
 	Logger *slog.Logger `json:"-"`
 }
 

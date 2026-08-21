@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/michaelquigley/pfxlog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -198,7 +197,7 @@ func TestBusyHeartbeat(t *testing.T) {
 				msg := NewMessage(ContentTypePingType, []byte("hello"))
 				if err := msg.WithTimeout(time.Second).Send(ch); err != nil {
 					if !ch.IsClosed() {
-						pfxlog.Logger().WithError(err).WithField("side", "server").Error("send error")
+						For("channel.test").With("side", "server").Error("send error", "error", err)
 						errC <- err
 					}
 					return

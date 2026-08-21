@@ -18,8 +18,6 @@ package channel
 
 import (
 	"time"
-
-	"github.com/michaelquigley/pfxlog"
 )
 
 // An UnderlayAcceptor take an Underlay and generally turns it into a channel for a specific use.
@@ -60,14 +58,14 @@ func NewUnderlayDispatcher(config UnderlayDispatcherConfig) *UnderlayDispatcher 
 
 // Run accepts underlays in a loop, dispatching each to the appropriate acceptor based on TypeHeader.
 func (self *UnderlayDispatcher) Run() {
-	log := pfxlog.Logger()
+	log := For("channel.dispatcher")
 	log.Info("started")
 	defer log.Warn("exited")
 
 	for {
 		underlay, err := self.listener.Create(self.connectTimeout)
 		if err != nil {
-			log.WithError(err).Error("error accepting connection")
+			log.Error("error accepting connection", "error", err)
 			if err.Error() == "closed" {
 				return
 			}
@@ -89,13 +87,13 @@ func (self *UnderlayDispatcher) Run() {
 			log.Warn("incoming request didn't have a recognized type header, and no default acceptor defined. closing connection")
 			closeUnderlay = true
 		} else if err = acceptor.AcceptUnderlay(underlay); err != nil {
-			log.WithError(err).Error("error handling incoming connection, closing connection")
+			log.Error("error handling incoming connection, closing connection", "error", err)
 			closeUnderlay = true
 		}
 
 		if closeUnderlay {
 			if err = underlay.Close(); err != nil {
-				log.WithError(err).Info("error closing connection")
+				log.Info("error closing connection", "error", err)
 			}
 		}
 	}

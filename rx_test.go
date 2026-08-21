@@ -18,6 +18,7 @@ package channel
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 
@@ -29,6 +30,7 @@ func newTestChannelImpl() *channelImpl {
 	var u Underlay = underlay
 
 	ch := &channelImpl{
+		log:             slog.Default(),
 		logicalName:     "test",
 		receiveHandlers: map[int32]ReceiveHandlerF{},
 		underlays:       NewUnderlays(),

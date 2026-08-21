@@ -23,7 +23,6 @@ import (
 	"maps"
 	"time"
 
-	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/identity"
 	"github.com/openziti/transport/v2"
 )
@@ -112,7 +111,7 @@ func (self *classicDialer) Create(timeout time.Duration) (Underlay, error) {
 }
 
 func (self *classicDialer) CreateWithHeaders(timeout time.Duration, headers map[int32][]byte) (Underlay, error) {
-	log := pfxlog.ContextLogger(self.endpoint.String())
+	log := For("channel.dialer").With("context", self.endpoint.String())
 	log.Debug("started")
 	defer log.Debug("exited")
 
@@ -125,7 +124,7 @@ func (self *classicDialer) CreateWithHeaders(timeout time.Duration, headers map[
 	version := uint32(2)
 	tryCount := 0
 
-	log.Debugf("Attempting to dial with bind: %s", self.localBinding)
+	log.Debug("attempting to dial", "bind", self.localBinding)
 
 	for time.Now().Before(deadline) {
 		peer, err := self.endpoint.DialWithLocalBinding("classic", self.localBinding, self.identity, timeout, self.transportConfig)
@@ -148,7 +147,7 @@ func (self *classicDialer) CreateWithHeaders(timeout time.Duration, headers map[
 				return nil, err
 			}
 
-			log.WithError(err).Warnf("error initiating channel with hello, retrying with protocol version %v", retryVersion)
+			log.Warn("error initiating channel with hello, retrying with protocol version", "error", err, "retryVersion", retryVersion)
 			tryCount++
 			version = retryVersion
 			continue
@@ -159,7 +158,7 @@ func (self *classicDialer) CreateWithHeaders(timeout time.Duration, headers map[
 }
 
 func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Time, headers map[int32][]byte) (err error) {
-	log := pfxlog.ContextLogger(underlay.Label())
+	log := For("channel.dialer").With("context", underlay.Label())
 	defer log.Debug("exited")
 	log.Debug("started")
 
@@ -180,7 +179,7 @@ func (self *classicDialer) sendHello(underlay classicUnderlay, deadline time.Tim
 
 	defer func() {
 		if dlErr := peer.SetDeadline(time.Time{}); dlErr != nil { // clear write deadline
-			log.WithError(dlErr).Error("unable to clear deadline")
+			log.Error("unable to clear deadline", "error", dlErr)
 		}
 	}()
 

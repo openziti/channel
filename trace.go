@@ -18,12 +18,11 @@ package channel
 
 import (
 	"fmt"
-	"github.com/michaelquigley/pfxlog"
-	"github.com/openziti/channel/v5/trace"
-	"github.com/openziti/channel/v5/trace/pb"
-	"github.com/sirupsen/logrus"
 	"os"
 	"time"
+
+	"github.com/openziti/channel/v5/trace"
+	trace_pb "github.com/openziti/channel/v5/trace/pb"
 )
 
 // TraceHandler is a PeekHandler that writes channel message traces to a file.
@@ -61,7 +60,7 @@ func (h *TraceHandler) Connect(ch Channel, remoteAddress string) {
 		RemoteAddress: remoteAddress,
 		Connected:     true,
 	}, h.f); err != nil {
-		pfxlog.ContextLogger(ch.Label()).Errorf("unexpected error (%s)", err)
+		For("channel.trace").With("context", ch.Label()).Error("unexpected error", "error", err)
 	}
 }
 
@@ -80,7 +79,7 @@ func (h TraceHandler) Close(ch Channel) {
 		Channel:   ch.Label(),
 		Connected: false,
 	}, h.f); err != nil {
-		pfxlog.ContextLogger(ch.Label()).Errorf("unexpected error (%s)", err)
+		For("channel.trace").With("context", ch.Label()).Error("unexpected error", "error", err)
 	}
 }
 
@@ -106,11 +105,11 @@ func (h TraceHandler) writeChannelMessage(msg *Message, ch Channel, rx bool) {
 	}
 
 	if err := trace.WriteChannelMessage(t, h.f); err != nil {
-		pfxlog.ContextLogger(ch.Label()).Errorf("unexpected error (%s)", err)
+		For("channel.trace").With("context", ch.Label()).Error("unexpected error", "error", err)
 	}
 
 	if h.logTraces {
-		logrus.Info(h.msgToString(t))
+		For("channel.trace").Info(h.msgToString(t))
 	}
 }
 
