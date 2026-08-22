@@ -20,8 +20,6 @@ import (
 	"crypto/x509"
 	"net"
 	"time"
-
-	"github.com/michaelquigley/pfxlog"
 )
 
 // TypeLoggingUnderlay wraps an Underlay and logs the content type of each transmitted message.
@@ -34,7 +32,7 @@ func (self *TypeLoggingUnderlay) Rx() (*Message, error) {
 }
 
 func (self *TypeLoggingUnderlay) Tx(m *Message) error {
-	pfxlog.Logger().Infof("sending msg of type %d on %s\n", m.ContentType, GetUnderlayType(self.wrapped))
+	For("channel.underlay").Info("sending msg", "contentType", m.ContentType, "on", GetUnderlayType(self.wrapped))
 	return self.wrapped.Tx(m)
 }
 

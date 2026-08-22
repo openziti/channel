@@ -21,8 +21,6 @@ import (
 	"math/rand/v2"
 	"sync"
 	"time"
-
-	"github.com/michaelquigley/pfxlog"
 )
 
 // DialPolicy controls how additional underlays are dialed for a multi-underlay channel.
@@ -115,9 +113,10 @@ func (self *BackoffDialPolicy) UnderlayClosed(underlayType string, lifetime time
 	if lifetime < self.Backoff.MinStableDuration {
 		self.consecutiveFailures++
 		self.lastNegativeEvent = time.Now()
-		pfxlog.Logger().WithField("underlayType", underlayType).
-			WithField("lifetime", lifetime).
-			WithField("consecutiveFailures", self.consecutiveFailures).
+		For("channel.dialer").
+			With("underlayType", underlayType,
+				"lifetime", lifetime,
+				"consecutiveFailures", self.consecutiveFailures).
 			Info("short-lived underlay closed")
 	} else {
 		self.consecutiveFailures = 0
@@ -223,7 +222,7 @@ func (self *BackoffDialPolicy) groupConnectionId(connectionId string, isFirst bo
 // current iteration id with no header, so they attach to the established group.
 func (self *BackoffDialPolicy) Dial(underlayType string, connectionId string, groupSecret []byte, isFirst bool, connectTimeout time.Duration, cancel <-chan struct{}) (Underlay, error) {
 	groupId := self.groupConnectionId(connectionId, isFirst)
-	log := pfxlog.Logger().WithField("underlayType", underlayType).WithField("connectionId", groupId).WithField("isFirst", isFirst)
+	log := For("channel.dialer").With("underlayType", underlayType, "connectionId", groupId, "isFirst", isFirst)
 
 	self.resetStaleFailures()
 
@@ -247,7 +246,7 @@ func (self *BackoffDialPolicy) Dial(underlayType string, connectionId string, gr
 	self.mu.Unlock()
 
 	if delay := self.getBackoffDelay(); delay > 0 {
-		log.WithField("delay", delay).Debug("backing off before dial")
+		log.With("delay", delay).Debug("backing off before dial")
 		select {
 		case <-cancel:
 			return nil, ClosedError{}
@@ -274,7 +273,7 @@ func (self *BackoffDialPolicy) Dial(underlayType string, connectionId string, gr
 	underlay, err := self.Dialer.CreateWithHeaders(connectTimeout, headers)
 	if err != nil {
 		self.recordFailure()
-		log.WithError(err).Info("dial failed")
+		log.Info("dial failed", "error", err)
 		return nil, err
 	}
 

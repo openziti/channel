@@ -16,8 +16,6 @@
 
 package channel
 
-import "github.com/michaelquigley/pfxlog"
-
 // HelloAcceptor takes ownership of an underlay whose hello has been received but not
 // yet acknowledged. Implementations must call ackHello exactly once before using the
 // underlay for application traffic, and must close the underlay if they do not accept
@@ -40,7 +38,7 @@ type HelloAcceptorF func(underlay Underlay)
 // wrapped function. If the acknowledgement fails the underlay is closed.
 func (f HelloAcceptorF) AcceptUnderlay(underlay Underlay, ackHello func() error) {
 	if err := ackHello(); err != nil {
-		pfxlog.Logger().WithError(err).Error("error acknowledging hello")
+		For("channel.hello").Error("error acknowledging hello", "error", err)
 		_ = underlay.Close()
 		return
 	}
@@ -54,9 +52,9 @@ func (f HelloAcceptorF) AcceptUnderlay(underlay Underlay, ackHello func() error)
 func AsHelloAcceptor(acceptor UnderlayAcceptor) HelloAcceptor {
 	return HelloAcceptorF(func(underlay Underlay) {
 		if err := acceptor.AcceptUnderlay(underlay); err != nil {
-			pfxlog.Logger().WithError(err).Error("error handling incoming connection, closing connection")
+			For("channel.hello").Error("error handling incoming connection, closing connection", "error", err)
 			if closeErr := underlay.Close(); closeErr != nil {
-				pfxlog.Logger().WithError(closeErr).Info("error closing connection")
+				For("channel.hello").Info("error closing connection", "error", closeErr)
 			}
 		}
 	})
@@ -83,9 +81,9 @@ func (self *TypeRoutingAcceptor) AcceptUnderlay(underlay Underlay, ackHello func
 	}
 
 	if acceptor == nil {
-		pfxlog.Logger().Warn("incoming request didn't have a recognized type header, and no default acceptor defined. closing connection")
+		For("channel.hello").Warn("incoming request didn't have a recognized type header, and no default acceptor defined. closing connection")
 		if err := underlay.Close(); err != nil {
-			pfxlog.Logger().WithError(err).Info("error closing connection")
+			For("channel.hello").Info("error closing connection", "error", err)
 		}
 		return
 	}

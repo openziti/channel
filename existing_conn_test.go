@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/michaelquigley/pfxlog"
 	"github.com/openziti/identity"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +46,7 @@ func TestExistingConnWriteAndReply(t *testing.T) {
 					reply := NewResult(true, string(m.Body))
 					reply.ReplyTo(m)
 					if err := reply.WithTimeout(time.Second).SendAndWaitForWire(ch); err != nil {
-						pfxlog.Logger().WithError(err).Error("unable to send reply")
+						For("channel.test").Error("unable to send reply", "error", err)
 					}
 				})
 				return nil

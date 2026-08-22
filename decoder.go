@@ -16,10 +16,6 @@
 
 package channel
 
-import (
-	"github.com/michaelquigley/pfxlog"
-)
-
 // Decoder decodes built-in channel message types (hello, ping, result, latency, heartbeat) for tracing.
 type Decoder struct{}
 
@@ -36,7 +32,7 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 
 		data, err := meta.MarshalTraceMessageDecode()
 		if err != nil {
-			pfxlog.Logger().Errorf("unexpected error (%s)", err)
+			For("channel.decoder").Error("unexpected error", "error", err)
 			return nil, true
 		}
 
@@ -44,7 +40,7 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 	case ContentTypePingType:
 		data, err := NewTraceMessageDecode(DECODER, "Ping").MarshalTraceMessageDecode()
 		if err != nil {
-			pfxlog.Logger().Errorf("unexpected error (%s)", err)
+			For("channel.decoder").Error("unexpected error", "error", err)
 			return nil, true
 		}
 
@@ -60,7 +56,7 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 
 		data, err := meta.MarshalTraceMessageDecode()
 		if err != nil {
-			pfxlog.Logger().Errorf("unexpected error (%s)", err)
+			For("channel.decoder").Error("unexpected error", "error", err)
 			return nil, true
 		}
 
@@ -71,7 +67,7 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 		meta["probeTime"], _ = msg.GetUint64Header(128)
 		data, err := meta.MarshalTraceMessageDecode()
 		if err != nil {
-			pfxlog.Logger().Errorf("unexpected error (%s)", err)
+			For("channel.decoder").Error("unexpected error", "error", err)
 			return nil, true
 		}
 
@@ -82,7 +78,7 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 		meta["probeTime"], _ = msg.GetUint64Header(128)
 		data, err := meta.MarshalTraceMessageDecode()
 		if err != nil {
-			pfxlog.Logger().Errorf("unexpected error (%s)", err)
+			For("channel.decoder").Error("unexpected error", "error", err)
 			return nil, true
 		}
 		return data, true
@@ -91,7 +87,7 @@ func (d Decoder) Decode(msg *Message) ([]byte, bool) {
 		meta := NewTraceMessageDecode(DECODER, "Heartbeat")
 		data, err := meta.MarshalTraceMessageDecode()
 		if err != nil {
-			pfxlog.Logger().Errorf("unexpected error (%s)", err)
+			For("channel.decoder").Error("unexpected error", "error", err)
 			return nil, true
 		}
 		return data, true

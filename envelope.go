@@ -4,9 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/michaelquigley/pfxlog"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 type envelopeImpl struct {
@@ -162,10 +160,10 @@ func (self *replyEnvelope) AcceptReply(message *Message) {
 	select {
 	case self.replyC <- message:
 	default:
-		logrus.
-			WithField("seq", message.Sequence()).
-			WithField("replyFor", message.ReplyFor()).
-			WithField("contentType", message.ContentType).
+		For("channel.envelope").
+			With("seq", message.Sequence(),
+				"replyFor", message.ReplyFor(),
+				"contentType", message.ContentType).
 			Error("could not send reply on reply channel, channel was busy")
 	}
 }
@@ -291,6 +289,6 @@ func (self *errorContext) Err() error {
 
 func (self *errorContext) Value(interface{}) interface{} {
 	// ignore for now. may need an implementation at some point
-	pfxlog.Logger().Error("errorContext.Value called, but not implemented!!!")
+	For("channel.envelope").Error("errorContext.Value called, but not implemented!!!")
 	return nil
 }

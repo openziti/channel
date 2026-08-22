@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 // Heartbeat timing defaults.
@@ -238,18 +237,18 @@ func (self *heartbeater) pulse(checkInterval time.Duration) {
 func (self *heartbeater) sendHeartbeat() {
 	m := NewMessage(ContentTypeHeartbeat, nil) // don't need to add heartbeat
 	if err := m.WithTimeout(time.Second).SendAndWaitForWire(self.ch); err != nil && !self.ch.IsClosed() {
-		logrus.WithError(err).
-			WithField("channelId", self.ch.Label()).
-			Error("pulse failed to send heartbeat")
+		For("channel.heartbeat").
+			With("channelId", self.ch.Label()).
+			Error("pulse failed to send heartbeat", "error", err)
 	}
 }
 
 func (self *heartbeater) sendHeartbeatIfQueueFree() {
 	m := NewMessage(ContentTypeHeartbeat, nil) // don't need to add heartbeat
 	if err := m.WithTimeout(10 * time.Millisecond).Send(self.ch); err != nil && !self.ch.IsClosed() {
-		logrus.WithError(err).
-			WithField("channelId", self.ch.Label()).
-			Error("handleUnresponded failed to send heartbeat")
+		For("channel.heartbeat").
+			With("channelId", self.ch.Label()).
+			Error("handleUnresponded failed to send heartbeat", "error", err)
 	}
 }
 
