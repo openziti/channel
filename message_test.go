@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -282,4 +283,74 @@ func Test_ReplyToWithoutReflectedHeaderAddsNothing(t *testing.T) {
 	assert.True(t, reply.IsReplyingTo(7))
 	_, found := reply.Headers[ReflectedHeader]
 	assert.False(t, found, "no reflected header should be added when the request had none")
+}
+
+// Test_ReplyForMalformed covers a ReplyFor header that is present but not 4 bytes wide.
+// The getters must return the not-a-reply default rather than dereferencing a nil cache.
+func Test_ReplyForMalformed(t *testing.T) {
+	// backing array so a zero-length header value is a non-nil empty slice, as it is
+	// when sliced out of wire data
+	backing := make([]byte, 16)
+
+	for _, length := range []int{0, 1, 3, 5, 8} {
+		t.Run(fmt.Sprintf("len-%d", length), func(t *testing.T) {
+			m := NewMessage(1, nil)
+			m.Headers[ReplyForHeader] = backing[:length]
+
+			require.NotPanics(t, func() {
+				assert.False(t, m.IsReply())
+				assert.Equal(t, int32(-1), m.ReplyFor())
+				assert.False(t, m.IsReplyingTo(1))
+			})
+		})
+	}
+}
+
+func Test_ReplyForWellFormed(t *testing.T) {
+	m := NewMessage(1, nil)
+	m.PutUint32Header(ReplyForHeader, 7)
+
+	assert.True(t, m.IsReply())
+	assert.Equal(t, int32(7), m.ReplyFor())
+	assert.True(t, m.IsReplyingTo(7))
+	assert.False(t, m.IsReplyingTo(8))
+}
+
+func Test_ReplyForAbsent(t *testing.T) {
+	m := NewMessage(1, nil)
+
+	assert.False(t, m.IsReply())
+	assert.Equal(t, int32(-1), m.ReplyFor())
+}
+
+// Test_unmarshalHeadersRejectsBadReplyFor asserts a malformed ReplyFor is rejected at
+// unmarshal, so the frame is dropped rather than silently treated as a non-reply.
+func Test_unmarshalHeadersRejectsBadReplyFor(t *testing.T) {
+	buildHeader := func(key int32, val []byte) []byte {
+		buf := make([]byte, 8+len(val))
+		binary.LittleEndian.PutUint32(buf[0:4], uint32(key))
+		binary.LittleEndian.PutUint32(buf[4:8], uint32(len(val)))
+		copy(buf[8:], val)
+		return buf
+	}
+
+	for _, length := range []int{0, 1, 3, 5, 8} {
+		t.Run(fmt.Sprintf("len-%d", length), func(t *testing.T) {
+			_, err := unmarshalHeaders(buildHeader(ReplyForHeader, make([]byte, length)))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid replyFor header length")
+		})
+	}
+
+	t.Run("valid", func(t *testing.T) {
+		headers, err := unmarshalHeaders(buildHeader(ReplyForHeader, []byte{1, 0, 0, 0}))
+		require.NoError(t, err)
+		assert.Equal(t, []byte{1, 0, 0, 0}, headers[ReplyForHeader])
+	})
+
+	t.Run("other header any length", func(t *testing.T) {
+		headers, err := unmarshalHeaders(buildHeader(TypeHeader, []byte{1, 2, 3}))
+		require.NoError(t, err)
+		assert.Equal(t, []byte{1, 2, 3}, headers[TypeHeader])
+	})
 }
