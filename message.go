@@ -53,6 +53,11 @@ const (
 	IsFirstGroupConnection          = 11
 	UnderlayTypeHeader              = 12
 
+	// replyForHeaderLen is the wire width of ReplyForHeader. The message layer decodes this
+	// header itself, so unmarshalHeaders rejects any other length rather than leaving a value
+	// the getters cannot interpret.
+	replyForHeaderLen = 4
+
 	// Headers in the range 128-255 inclusive will be reflected when creating replies
 	ReflectedHeaderBitMask = 1 << 7
 	MaxReflectedHeader     = (1 << 8) - 1
@@ -82,22 +87,22 @@ func (header *MessageHeader) Sequence() int32 {
 	return header.sequence
 }
 
+// cacheReplyFor populates the cached replyFor value from the ReplyFor header, defaulting to -1
+// (not a reply) when the header is absent or not the expected 4 bytes. Every path assigns
+// header.replyFor, so ReplyFor, IsReply and IsReplyingTo can dereference it unconditionally.
+// Messages read off the wire are length-checked by unmarshalHeaders; the fallback here covers
+// headers set programmatically.
 func (header *MessageHeader) cacheReplyFor() {
 	if header.replyFor == nil {
-		replyFor, found := header.Headers[ReplyForHeader]
-		if found {
-			if len(replyFor) != 4 {
-				pfxlog.Logger().Warnf("incorrect replyFor encoding. length should be 4 not %v", len(replyFor))
+		val := int32(-1)
+		if replyFor, found := header.Headers[ReplyForHeader]; found {
+			if len(replyFor) == replyForHeaderLen {
+				val = int32(binary.LittleEndian.Uint32(replyFor))
 			} else {
-				val := int32(binary.LittleEndian.Uint32(replyFor))
-				header.replyFor = &val
+				pfxlog.Logger().Warnf("incorrect replyFor encoding. length should be 4 not %v", len(replyFor))
 			}
 		}
-
-		if replyFor == nil {
-			val := int32(-1)
-			header.replyFor = &val
-		}
+		header.replyFor = &val
 	}
 }
 
@@ -571,6 +576,9 @@ func unmarshalHeaders(headerData []byte) (map[int32][]byte, error) {
 		length := readUint32(headerData[i+4 : i+8])
 		if (i + 8 + int(length)) > len(headerData) {
 			return nil, fmt.Errorf("short header data (%d >= %d)", i+8+int(length), len(headerData))
+		}
+		if key == ReplyForHeader && length != replyForHeaderLen {
+			return nil, fmt.Errorf("invalid replyFor header length (%d), must be %d", length, replyForHeaderLen)
 		}
 		data := headerData[i+8 : i+8+int(length)]
 		out[key] = data
