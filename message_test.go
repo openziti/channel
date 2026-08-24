@@ -17,6 +17,7 @@
 package channel
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -237,4 +238,56 @@ func Test_unmarshalHeadersRejectsBadReplyFor(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []byte{1, 2, 3}, headers[TypeHeader])
 	})
+}
+
+// buildHeaderBlock lays out one header in the on-wire format: key, declared length, value.
+// declaredLen is passed separately from the value so a test can declare a length the value
+// does not have.
+func buildHeaderBlock(key int32, declaredLen uint32, val []byte) []byte {
+	buf := make([]byte, 8+len(val))
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(key))
+	binary.LittleEndian.PutUint32(buf[4:8], declaredLen)
+	copy(buf[8:], val)
+	return buf
+}
+
+// Test_unmarshalHeadersLengthOverflow covers a header whose declared length does not fit in
+// an int on a 32-bit platform. The bounds check must reject it rather than converting first.
+//
+// NOTE: on a 64-bit platform int(length) is exact, so this passes with or without the fix.
+// It only fails on the unfixed code under GOARCH=386.
+func Test_unmarshalHeadersLengthOverflow(t *testing.T) {
+	for _, declared := range []uint32{0x80000000, 0xFFFFFFF0, 0xFFFFFFFF} {
+		t.Run(fmt.Sprintf("declared-%#x", declared), func(t *testing.T) {
+			require.NotPanics(t, func() {
+				_, err := unmarshalHeaders(buildHeaderBlock(7, declared, nil))
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "short header data")
+			})
+		})
+	}
+}
+
+// Test_unmarshalV2LengthWrap covers declared lengths whose uint32 sum wraps. The wrapped
+// total agrees with every check that follows, so the header slice is what panics.
+func Test_unmarshalV2LengthWrap(t *testing.T) {
+	messageSection := make([]byte, dataSectionV2)
+	copy(messageSection[0:magicLength], magicV2)
+
+	for _, tc := range []struct {
+		name          string
+		headersLength uint32
+		bodyLength    uint32
+	}{
+		{name: "sum wraps to zero", headersLength: 0xFFFFFFFF, bodyLength: 1},
+		{name: "sum wraps to small", headersLength: 0xFFFFFFF0, bodyLength: 0x20},
+		{name: "sum exceeds MaxInt32 without wrapping", headersLength: 0x7FFFFFFF, bodyLength: 0x7FFFFFFF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				_, err := unmarshalV2(bytes.NewReader(nil), messageSection, tc.headersLength, tc.bodyLength)
+				require.Error(t, err)
+			})
+		})
+	}
 }

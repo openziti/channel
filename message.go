@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	"github.com/michaelquigley/pfxlog"
@@ -515,13 +516,22 @@ func ReadV2(peer io.Reader) (*Message, error) {
 
 // unmarshalV2 converts a block of V2 wire format data into a *Message.
 func unmarshalV2(peer io.Reader, messageSectionData []byte, headersLength, bodyLength uint32) (*Message, error) {
-	dataSectionData := make([]byte, headersLength+bodyLength)
+	// summed as uint64: in uint32 the sum wraps, and a wrapped total passes every check
+	// that follows before the header slice panics. The bound keeps the total exact as an
+	// int on 32-bit platforms; it is a representability limit, not a policy limit on
+	// message size.
+	dataSectionLen := uint64(headersLength) + uint64(bodyLength)
+	if dataSectionLen > math.MaxInt32 {
+		return nil, fmt.Errorf("declared data section of %d bytes exceeds the maximum of %d", dataSectionLen, math.MaxInt32)
+	}
+
+	dataSectionData := make([]byte, dataSectionLen)
 	read, err := io.ReadFull(peer, dataSectionData)
 	if err != nil {
 		return nil, err
 	}
 
-	if read != int(headersLength+bodyLength) {
+	if uint64(read) != dataSectionLen {
 		return nil, errors.New("short read")
 	}
 
@@ -574,8 +584,11 @@ func unmarshalHeaders(headerData []byte) (map[int32][]byte, error) {
 
 		key := readInt32(headerData[i : i+4])
 		length := readUint32(headerData[i+4 : i+8])
-		if (i + 8 + int(length)) > len(headerData) {
-			return nil, fmt.Errorf("short header data (%d >= %d)", i+8+int(length), len(headerData))
+		// compared as uint64: where int is 32 bits, int(length) is negative above MaxInt32,
+		// which passes this check and then panics on the slice below
+		end := uint64(i) + 8 + uint64(length)
+		if end > uint64(len(headerData)) {
+			return nil, fmt.Errorf("short header data (%d >= %d)", end, len(headerData))
 		}
 		if key == ReplyForHeader && length != replyForHeaderLen {
 			return nil, fmt.Errorf("invalid replyFor header length (%d), must be %d", length, replyForHeaderLen)
