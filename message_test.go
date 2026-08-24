@@ -171,7 +171,7 @@ func Test_StringToStringMapEncodeDecode(t *testing.T) {
 }
 
 // Test_ReplyForMalformed covers a ReplyFor header that is present but not 4 bytes wide.
-// The getters must return the not-a-reply default rather than dereferencing a nil cache.
+// Every getter must report the not-a-reply default for it.
 func Test_ReplyForMalformed(t *testing.T) {
 	// backing array so a zero-length header value is a non-nil empty slice, as it is
 	// when sliced out of wire data
@@ -251,11 +251,12 @@ func buildHeaderBlock(key int32, declaredLen uint32, val []byte) []byte {
 	return buf
 }
 
-// Test_unmarshalHeadersLengthOverflow covers a header whose declared length does not fit in
-// an int on a 32-bit platform. The bounds check must reject it rather than converting first.
+// Test_unmarshalHeadersLengthOverflow covers a header whose declared length exceeds what an
+// int holds exactly on a 32-bit platform. The bounds check must reject it at the declared
+// width rather than converting first.
 //
-// NOTE: on a 64-bit platform int(length) is exact, so this passes with or without the fix.
-// It only fails on the unfixed code under GOARCH=386.
+// NOTE: this only exercises the defect it guards under GOARCH=386. Where int is 64 bits the
+// conversion is exact and the case is reached by the ordinary short-header path.
 func Test_unmarshalHeadersLengthOverflow(t *testing.T) {
 	for _, declared := range []uint32{0x80000000, 0xFFFFFFF0, 0xFFFFFFFF} {
 		t.Run(fmt.Sprintf("declared-%#x", declared), func(t *testing.T) {
@@ -268,8 +269,9 @@ func Test_unmarshalHeadersLengthOverflow(t *testing.T) {
 	}
 }
 
-// Test_unmarshalV2LengthWrap covers declared lengths whose uint32 sum wraps. The wrapped
-// total agrees with every check that follows, so the header slice is what panics.
+// Test_unmarshalV2LengthWrap covers declared lengths whose sum wraps at uint32 width. A
+// wrapped total is self-consistent with the checks that follow it, so it must be rejected
+// at the point the two lengths are combined.
 func Test_unmarshalV2LengthWrap(t *testing.T) {
 	messageSection := make([]byte, dataSectionV2)
 	copy(messageSection[0:magicLength], magicV2)
