@@ -17,9 +17,14 @@
 package channel
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
-	"github.com/stretchr/testify/assert"
+	"fmt"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_getRetryVersionFor(t *testing.T) {
@@ -163,4 +168,128 @@ func Test_StringToStringMapEncodeDecode(t *testing.T) {
 	decoded, err := DecodeStringToStringMap(encoded)
 	req.NoError(err)
 	req.Equal((map[string]string)(nil), decoded)
+}
+
+// Test_ReplyForMalformed covers a ReplyFor header that is present but not 4 bytes wide.
+// Every getter must report the not-a-reply default for it.
+func Test_ReplyForMalformed(t *testing.T) {
+	// backing array so a zero-length header value is a non-nil empty slice, as it is
+	// when sliced out of wire data
+	backing := make([]byte, 16)
+
+	for _, length := range []int{0, 1, 3, 5, 8} {
+		t.Run(fmt.Sprintf("len-%d", length), func(t *testing.T) {
+			m := NewMessage(1, nil)
+			m.Headers[ReplyForHeader] = backing[:length]
+
+			require.NotPanics(t, func() {
+				assert.False(t, m.IsReply())
+				assert.Equal(t, int32(-1), m.ReplyFor())
+				assert.False(t, m.IsReplyingTo(1))
+			})
+		})
+	}
+}
+
+func Test_ReplyForWellFormed(t *testing.T) {
+	m := NewMessage(1, nil)
+	m.PutUint32Header(ReplyForHeader, 7)
+
+	assert.True(t, m.IsReply())
+	assert.Equal(t, int32(7), m.ReplyFor())
+	assert.True(t, m.IsReplyingTo(7))
+	assert.False(t, m.IsReplyingTo(8))
+}
+
+func Test_ReplyForAbsent(t *testing.T) {
+	m := NewMessage(1, nil)
+
+	assert.False(t, m.IsReply())
+	assert.Equal(t, int32(-1), m.ReplyFor())
+}
+
+// Test_unmarshalHeadersRejectsBadReplyFor asserts a malformed ReplyFor is rejected at
+// unmarshal, so the frame is dropped rather than silently treated as a non-reply.
+func Test_unmarshalHeadersRejectsBadReplyFor(t *testing.T) {
+	buildHeader := func(key int32, val []byte) []byte {
+		buf := make([]byte, 8+len(val))
+		binary.LittleEndian.PutUint32(buf[0:4], uint32(key))
+		binary.LittleEndian.PutUint32(buf[4:8], uint32(len(val)))
+		copy(buf[8:], val)
+		return buf
+	}
+
+	for _, length := range []int{0, 1, 3, 5, 8} {
+		t.Run(fmt.Sprintf("len-%d", length), func(t *testing.T) {
+			_, err := unmarshalHeaders(buildHeader(ReplyForHeader, make([]byte, length)))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid replyFor header length")
+		})
+	}
+
+	t.Run("valid", func(t *testing.T) {
+		headers, err := unmarshalHeaders(buildHeader(ReplyForHeader, []byte{1, 0, 0, 0}))
+		require.NoError(t, err)
+		assert.Equal(t, []byte{1, 0, 0, 0}, headers[ReplyForHeader])
+	})
+
+	t.Run("other header any length", func(t *testing.T) {
+		headers, err := unmarshalHeaders(buildHeader(TypeHeader, []byte{1, 2, 3}))
+		require.NoError(t, err)
+		assert.Equal(t, []byte{1, 2, 3}, headers[TypeHeader])
+	})
+}
+
+// buildHeaderBlock lays out one header in the on-wire format: key, declared length, value.
+// declaredLen is passed separately from the value so a test can declare a length the value
+// does not have.
+func buildHeaderBlock(key int32, declaredLen uint32, val []byte) []byte {
+	buf := make([]byte, 8+len(val))
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(key))
+	binary.LittleEndian.PutUint32(buf[4:8], declaredLen)
+	copy(buf[8:], val)
+	return buf
+}
+
+// Test_unmarshalHeadersLengthOverflow covers a header whose declared length exceeds what an
+// int holds exactly on a 32-bit platform. The bounds check must reject it at the declared
+// width rather than converting first.
+//
+// NOTE: this only exercises the defect it guards under GOARCH=386. Where int is 64 bits the
+// conversion is exact and the case is reached by the ordinary short-header path.
+func Test_unmarshalHeadersLengthOverflow(t *testing.T) {
+	for _, declared := range []uint32{0x80000000, 0xFFFFFFF0, 0xFFFFFFFF} {
+		t.Run(fmt.Sprintf("declared-%#x", declared), func(t *testing.T) {
+			require.NotPanics(t, func() {
+				_, err := unmarshalHeaders(buildHeaderBlock(7, declared, nil))
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "short header data")
+			})
+		})
+	}
+}
+
+// Test_unmarshalV2LengthWrap covers declared lengths whose sum wraps at uint32 width. A
+// wrapped total is self-consistent with the checks that follow it, so it must be rejected
+// at the point the two lengths are combined.
+func Test_unmarshalV2LengthWrap(t *testing.T) {
+	messageSection := make([]byte, dataSectionV2)
+	copy(messageSection[0:magicLength], magicV2)
+
+	for _, tc := range []struct {
+		name          string
+		headersLength uint32
+		bodyLength    uint32
+	}{
+		{name: "sum wraps to zero", headersLength: 0xFFFFFFFF, bodyLength: 1},
+		{name: "sum wraps to small", headersLength: 0xFFFFFFF0, bodyLength: 0x20},
+		{name: "sum exceeds MaxInt32 without wrapping", headersLength: 0x7FFFFFFF, bodyLength: 0x7FFFFFFF},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				_, err := unmarshalV2(bytes.NewReader(nil), messageSection, tc.headersLength, tc.bodyLength)
+				require.Error(t, err)
+			})
+		})
+	}
 }
