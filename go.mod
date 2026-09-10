@@ -10,7 +10,7 @@ require (
 	github.com/openziti/transport/v2 v2.0.222
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
