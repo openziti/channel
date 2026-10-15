@@ -712,34 +712,34 @@ func (self *channelImpl) rxer(underlay Underlay, notifier *CloseNotifier) {
 }
 
 // UnderlayAdded implements UnderlayEventListener. Logs the event.
-func (self *channelImpl) UnderlayAdded(ch Channel, underlay Underlay) {
+func (self *channelImpl) UnderlayAdded(ch Channel, underlay Underlay, event UnderlayEvent) {
 	self.log.Info("underlay added",
 		"id", ch.Label(),
-		"underlays", ch.GetUnderlayCountsByType(),
+		"underlays", event.Count,
 		"underlayType", GetUnderlayType(underlay),
 	)
 }
 
 // UnderlayRemoved implements UnderlayEventListener. Reports the underlay's lifetime to the
 // dial policy for stability accounting, then checks constraints and triggers re-dial if needed.
-func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay) {
-	lifetime := time.Since(underlay.CreatedAt())
-
+func (self *channelImpl) UnderlayRemoved(ch Channel, underlay Underlay, event UnderlayEvent) {
 	self.log.Info("underlay removed",
 		"id", ch.Label(),
-		"underlays", ch.GetUnderlayCountsByType(),
+		"underlays", event.Count,
 		"underlayType", GetUnderlayType(underlay),
-		"lifetime", lifetime,
+		"lifetime", event.Lifetime,
 	)
 
 	if self.dialPolicy != nil {
-		self.dialPolicy.UnderlayClosed(self.getValidatedUnderlayType(underlay), lifetime)
+		// event.Lifetime is measured when the underlay left the set. Sampling the clock here would
+		// add however long this notification waited its turn to every reading the policy sees.
+		self.dialPolicy.UnderlayClosed(self.getValidatedUnderlayType(underlay), event.Lifetime)
 	}
 
 	if !self.isMultiUnderlayCapable() {
 		// A simple channel (no constraints, no dial policy) cannot recover from
 		// underlay loss. If no underlays remain, close the channel.
-		if len(self.underlays.GetAll()) == 0 {
+		if event.Count == 0 {
 			if err := self.Close(); err != nil {
 				self.log.Error("error closing channel after last underlay removed", "error", err)
 			}
