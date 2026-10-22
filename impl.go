@@ -575,7 +575,7 @@ func (self *channelImpl) tx(underlay Underlay, underlayType string, sendable Sen
 	sendListener := sendable.SendListener()
 	m := sendable.Msg()
 
-	if err := sendable.Context().Err(); err != nil {
+	if err := writeContext(sendable).Err(); err != nil {
 		sendListener.NotifyErr(TimeoutError{err})
 		return nil
 	}
