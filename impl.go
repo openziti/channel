@@ -251,7 +251,7 @@ func (channel *channelImpl) IsClosed() bool {
 
 func (channel *channelImpl) Send(s Sendable) error {
 	if err := s.Context().Err(); err != nil {
-		return err
+		return queueContextErr(err)
 	}
 
 	s.SetSequence(int32(channel.sequence.Next()))
@@ -271,7 +271,7 @@ func (channel *channelImpl) Send(s Sendable) error {
 
 func (channel *channelImpl) TrySend(s Sendable) (bool, error) {
 	if err := s.Context().Err(); err != nil {
-		return false, err
+		return false, queueContextErr(err)
 	}
 
 	s.SetSequence(int32(channel.sequence.Next()))
@@ -439,7 +439,7 @@ func (channel *channelImpl) tx(sendable Sendable, writeTimeout time.Duration) er
 	sendListener := sendable.SendListener()
 	m := sendable.Msg()
 
-	if err := sendable.Context().Err(); err != nil {
+	if err := writeContext(sendable).Err(); err != nil {
 		sendListener.NotifyErr(TimeoutError{err})
 		return nil
 	}
