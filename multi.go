@@ -373,7 +373,7 @@ func (self *multiChannelImpl) Tx(underlay Underlay, sendable Sendable, writeTime
 	sendListener := sendable.SendListener()
 	m := sendable.Msg()
 
-	if err := sendable.Context().Err(); err != nil {
+	if err := writeContext(sendable).Err(); err != nil {
 		sendListener.NotifyErr(TimeoutError{err})
 		return nil
 	}

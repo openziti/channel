@@ -19,11 +19,12 @@ package channel
 import (
 	"context"
 	"crypto/x509"
-	"github.com/openziti/transport/v2"
-	"github.com/pkg/errors"
 	"io"
 	"net"
 	"time"
+
+	"github.com/openziti/transport/v2"
+	"github.com/pkg/errors"
 )
 
 // Channel represents an asynchronous, message-passing framework, designed to sit on top of an underlay.
@@ -50,11 +51,14 @@ type MultiChannel interface {
 
 type Sender interface {
 	// Send will send the given Sendable. If the Sender is busy, it will wait until either the Sender
-	// can process the Sendable, the channel is closed or the associated context.Context times out
+	// can process the Sendable, the channel is closed or the associated context.Context times out.
+	// If the context is cancelled or times out before the Sendable is queued, a TimeoutError wrapping
+	// the context error is returned.
 	Send(s Sendable) error
 
 	// TrySend will send the given Sendable. If the Sender is busy (outgoing message queue is full), it will return
-	// immediately rather than wait. The boolean return indicates whether the message was queued or not
+	// immediately rather than wait. The boolean return indicates whether the message was queued or not.
+	// If the context is cancelled or has timed out, a TimeoutError wrapping the context error is returned.
 	TrySend(s Sendable) (bool, error)
 
 	// CloseNotify returns a channel that is closed when the sender is closed
@@ -75,7 +79,9 @@ type Sendable interface {
 	// Priority returns the Priority of the Message
 	Priority() Priority
 
-	// Context returns the Context used for timeouts/cancelling message sends, etc
+	// Context returns the Context used for timeouts/cancelling message sends, etc. It bounds the wait for queue
+	// space. It also bounds how long the message may wait in the queue before it is discarded instead of written,
+	// except for a message sent with SendAndWaitForQueue, which is written however long the queue takes to drain.
 	Context() context.Context
 
 	// SendListener returns the SendListener to invoke at each stage of the send operation
@@ -119,6 +125,12 @@ type TimeoutEnvelope interface {
 	// SendForReply will wait until the configured timeout or until a reply is received, whichever comes first
 	// If the timeout happens first, the context error will be returned, wrapped by a TimeoutError
 	SendForReply(sender Sender) (*Message, error)
+
+	// SendAndWaitForQueue will wait until the message is queued or until the configured timeout, whichever comes
+	// first. The timeout bounds only the wait for queue space: once queued, the message is written however long
+	// the queue takes to drain, unless the channel closes. If the timeout happens first, a TimeoutError is
+	// returned and the message is not written.
+	SendAndWaitForQueue(sender Sender) error
 }
 
 // SendListener is notified at the various stages of a message send
