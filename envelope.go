@@ -90,6 +90,47 @@ func (self *envelopeImpl) SendForReply(sender Sender) (*Message, error) {
 	return replyContext.WaitForReply(sender)
 }
 
+func (self *envelopeImpl) SendAndWaitForQueue(sender Sender) error {
+	queueWait := &queueWaitEnvelope{envelopeImpl: self}
+	return queueWait.WaitForQueue(sender)
+}
+
+// writeContextProvider is implemented by a Sendable whose write may outlive the Context that bounds its
+// queueing. Message and envelopeImpl must not implement it: types that embed them would inherit it and
+// silently stop honouring their own Context override.
+type writeContextProvider interface {
+	WriteContext() context.Context
+}
+
+// writeContext returns the context that must still be live when sendable is written.
+func writeContext(sendable Sendable) context.Context {
+	if provider, ok := sendable.(writeContextProvider); ok {
+		return provider.WriteContext()
+	}
+	return sendable.Context()
+}
+
+var _ writeContextProvider = (*queueWaitEnvelope)(nil)
+
+// queueWaitEnvelope applies the envelope's timeout to the wait for queue space only. Its WriteContext never
+// expires, so once queued the message is written however long the queue takes to drain.
+type queueWaitEnvelope struct {
+	*envelopeImpl
+}
+
+func (self *queueWaitEnvelope) ToSendable() Sendable {
+	return self
+}
+
+func (self *queueWaitEnvelope) WriteContext() context.Context {
+	return context.Background()
+}
+
+func (self *queueWaitEnvelope) WaitForQueue(sender Sender) error {
+	defer self.CancelF()
+	return sender.Send(self)
+}
+
 type sendWaitEnvelope struct {
 	*envelopeImpl
 	errC chan error
@@ -112,10 +153,6 @@ func (self *sendWaitEnvelope) NotifyErr(err error) {
 }
 
 func (self *sendWaitEnvelope) WaitForWire(sender Sender) error {
-	if err := self.context.Err(); err != nil {
-		return err
-	}
-
 	defer self.CancelF()
 
 	self.errC = make(chan error, 1)
@@ -173,10 +210,6 @@ func (self *replyEnvelope) NotifyErr(err error) {
 }
 
 func (self *replyEnvelope) WaitForReply(sender Sender) (*Message, error) {
-	if err := self.context.Err(); err != nil {
-		return nil, err
-	}
-
 	defer self.CancelF()
 
 	self.errC = make(chan error, 1)
@@ -247,6 +280,10 @@ func (self *errorEnvelope) SendAndWaitForWire(Sender) error {
 
 func (self *errorEnvelope) SendForReply(Sender) (*Message, error) {
 	return nil, self.ctx.Err()
+}
+
+func (self *errorEnvelope) SendAndWaitForQueue(Sender) error {
+	return self.ctx.Err()
 }
 
 func (self *errorEnvelope) WithTimeout(time.Duration) TimeoutEnvelope {
