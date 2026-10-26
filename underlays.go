@@ -16,12 +16,41 @@
 
 package channel
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
+
+// UnderlayEvent describes one change to a channel's underlay set, as it was at the moment the set
+// changed.
+//
+// Seq orders the changes. Notifications are delivered in Seq order, so a listener does not normally
+// need it, but it identifies an event for logging and lets a listener that batches or drops work out
+// what it missed.
+//
+// Count is the number of underlays after the change. It is sampled while the set is locked, so it is
+// what the change actually produced rather than what a later read would report. A listener deciding
+// connectivity must use it: a channel that loses its last underlay and immediately regains one
+// produces Count 0 then Count 1, while reading the channel afterwards reports 1 both times and the
+// outage disappears.
+//
+// Lifetime is how long the underlay was open, set for removals only. It is measured when the underlay
+// leaves the set rather than when the listener runs, so it does not absorb notification delay.
+type UnderlayEvent struct {
+	Seq      uint64
+	Count    int
+	Lifetime time.Duration
+}
 
 // UnderlayEventListener is notified when underlays are added or removed from a channel.
+//
+// Callbacks run on a goroutine owned by Underlays, one at a time and in the order the changes
+// happened, not on the goroutine that changed the set. A listener that blocks holds up every later
+// notification for that channel, so hand off rather than work in the callback. Do not assume a
+// callback has run by the time Add or Remove returns.
 type UnderlayEventListener interface {
-	UnderlayAdded(ch Channel, underlay Underlay)
-	UnderlayRemoved(ch Channel, underlay Underlay)
+	UnderlayAdded(ch Channel, underlay Underlay, event UnderlayEvent)
+	UnderlayRemoved(ch Channel, underlay Underlay, event UnderlayEvent)
 }
 
 // Underlays manages a set of underlays with listener notification on add/remove.
@@ -29,26 +58,54 @@ type Underlays struct {
 	lock      sync.Mutex
 	entries   []Underlay
 	listeners []UnderlayEventListener
+	nextSeq   uint64
+	// notified closes when the most recently queued notification has finished. Each new notification
+	// takes the current one as its predecessor and installs its own, so notifications form a chain
+	// that runs in the order the changes were made. Nil until the first change, which is what keeps
+	// the zero value usable.
+	notified chan struct{}
 }
 
-// NewUnderlays creates a new empty Underlays collection.
+// NewUnderlays creates a new empty Underlays collection. The zero value is also ready to use.
 func NewUnderlays() *Underlays {
 	return &Underlays{}
 }
 
-// Add appends the underlay and notifies all listeners.
+// notifyListeners delivers an event once every earlier change has been delivered. Linking to the
+// predecessor happens under the caller's hold of u.lock, so the chain is in change order; the waiting
+// happens on the new goroutine, so a change never blocks behind a listener.
+func (u *Underlays) notifyListeners(listeners []UnderlayEventListener, deliver func(UnderlayEventListener)) {
+	predecessor := u.notified
+	done := make(chan struct{})
+	u.notified = done
+
+	go func() {
+		defer close(done)
+		if predecessor != nil {
+			<-predecessor
+		}
+		for _, l := range listeners {
+			deliver(l)
+		}
+	}()
+}
+
+// Add appends the underlay and notifies all listeners. Listeners run on a separate goroutine, in
+// change order; see UnderlayEventListener.
 func (u *Underlays) Add(ch Channel, underlay Underlay) {
 	u.lock.Lock()
 	u.entries = append(u.entries, underlay)
 	listeners := u.listeners
+	event := UnderlayEvent{Seq: u.nextSeq, Count: len(u.entries)}
+	u.nextSeq++
+	u.notifyListeners(listeners, func(l UnderlayEventListener) {
+		l.UnderlayAdded(ch, underlay, event)
+	})
 	u.lock.Unlock()
-
-	for _, l := range listeners {
-		l.UnderlayAdded(ch, underlay)
-	}
 }
 
-// Remove removes the underlay and notifies all listeners if it was found.
+// Remove removes the underlay and notifies all listeners if it was found. Listeners run on a separate
+// goroutine, in change order; see UnderlayEventListener.
 func (u *Underlays) Remove(ch Channel, underlay Underlay) bool {
 	u.lock.Lock()
 	removed := false
@@ -60,13 +117,20 @@ func (u *Underlays) Remove(ch Channel, underlay Underlay) bool {
 		}
 	}
 	listeners := u.listeners
+	var event UnderlayEvent
+	if removed {
+		event = UnderlayEvent{
+			Seq:      u.nextSeq,
+			Count:    len(u.entries),
+			Lifetime: time.Since(underlay.CreatedAt()),
+		}
+		u.nextSeq++
+		u.notifyListeners(listeners, func(l UnderlayEventListener) {
+			l.UnderlayRemoved(ch, underlay, event)
+		})
+	}
 	u.lock.Unlock()
 
-	if removed {
-		for _, l := range listeners {
-			l.UnderlayRemoved(ch, underlay)
-		}
-	}
 	return removed
 }
 
