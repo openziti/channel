@@ -7,7 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/openziti/foundation/v2 v2.0.105
 	github.com/openziti/identity v1.0.144
-	github.com/openziti/transport/v2 v2.0.227
+	github.com/openziti/transport/v2 v2.0.228
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/protobuf v1.36.12
@@ -19,6 +19,6 @@ require (
 	github.com/parallaxsecond/parsec-client-go v0.0.0-20221025095442-f0a77d263cf9 // indirect
 	github.com/speps/go-hashids v2.0.0+incompatible // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 )
