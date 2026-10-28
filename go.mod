@@ -7,7 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/openziti/foundation/v2 v2.0.105
 	github.com/openziti/identity v1.0.144
-	github.com/openziti/transport/v2 v2.0.226
+	github.com/openziti/transport/v2 v2.0.227
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/protobuf v1.36.12
