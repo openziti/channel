@@ -88,6 +88,44 @@ func Test_sendHello_ClosesUnderlayOnFailure(t *testing.T) {
 	})
 }
 
+// Test_ClassicListener_AcceptsOtherValueUnderReplyForKeyInHello dials a classic listener with a hello
+// carrying a one-byte value under the ReplyFor header key, as protocols that use that key for their
+// own hello headers send. The listener must accept the hello and pass the header through unchanged.
+func Test_ClassicListener_AcceptsOtherValueUnderReplyForKeyInHello(t *testing.T) {
+	transport.AddAddressParser(tcp.AddressParser{})
+	req := require.New(t)
+
+	listenAddr, err := transport.ParseAddress("tcp:127.0.0.1:0")
+	req.NoError(err)
+
+	accepted := make(chan Underlay, 1)
+	listener, err := NewClassicListenerF(&identity.TokenId{Token: "test-server"}, listenAddr,
+		ListenerConfig{ConnectOptions: DefaultConnectOptions()}, func(underlay Underlay) { accepted <- underlay })
+	req.NoError(err)
+	defer func() { _ = listener.Close() }()
+
+	socket, ok := listener.(*classicListener).socket.(net.Listener)
+	req.True(ok, "the tcp transport should listen on a net.Listener")
+	dialAddr, err := transport.ParseAddress("tcp:" + socket.Addr().String())
+	req.NoError(err)
+
+	dialer := NewClassicDialer(DialerConfig{
+		Identity: &identity.TokenId{Token: "test-client"},
+		Endpoint: dialAddr,
+	})
+	underlay, err := dialer.CreateWithHeaders(2*time.Second, map[int32][]byte{ReplyForHeader: {1}})
+	req.NoError(err)
+	defer func() { _ = underlay.Close() }()
+
+	select {
+	case listenerUnderlay := <-accepted:
+		defer func() { _ = listenerUnderlay.Close() }()
+		req.Equal([]byte{1}, listenerUnderlay.Headers()[ReplyForHeader])
+	case <-time.After(2 * time.Second):
+		req.Fail("listener did not accept the underlay")
+	}
+}
+
 // Test_ClassicDialer_RetriesHelloOnlyToRenegotiateVersion pins what the dial loop's single retry is
 // for. Redialing helps only when the peer answered with a version we can speak; for anything else it
 // repeats an identical hello to the same endpoint, doubling the work a struggling listener has to do
