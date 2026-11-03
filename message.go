@@ -54,9 +54,9 @@ const (
 	IsFirstGroupConnection          = 11
 	UnderlayTypeHeader              = 12
 
-	// replyForHeaderLen is the wire width of ReplyForHeader. The message layer decodes this
-	// header itself, so unmarshalHeaders rejects any other length rather than leaving a value
-	// the getters cannot interpret.
+	// replyForHeaderLen is the wire width of ReplyForHeader. A value of any other width under
+	// that key reads as not a reply rather than failing the message: hello headers share their
+	// key space with the protocols built on channel, and some put their own values under it.
 	replyForHeaderLen = 4
 
 	// Headers in the range 128-255 inclusive will be reflected when creating replies
@@ -91,8 +91,6 @@ func (header *MessageHeader) Sequence() int32 {
 // cacheReplyFor populates the cached replyFor value from the ReplyFor header, defaulting to -1
 // (not a reply) when the header is absent or not the expected 4 bytes. Every path assigns
 // header.replyFor, so ReplyFor, IsReply and IsReplyingTo can dereference it unconditionally.
-// Messages read off the wire are length-checked by unmarshalHeaders; the fallback here covers
-// headers set programmatically.
 func (header *MessageHeader) cacheReplyFor() {
 	if header.replyFor == nil {
 		val := int32(-1)
@@ -589,9 +587,6 @@ func unmarshalHeaders(headerData []byte) (map[int32][]byte, error) {
 		end := uint64(i) + 8 + uint64(length)
 		if end > uint64(len(headerData)) {
 			return nil, fmt.Errorf("short header data (%d >= %d)", end, len(headerData))
-		}
-		if key == ReplyForHeader && length != replyForHeaderLen {
-			return nil, fmt.Errorf("invalid replyFor header length (%d), must be %d", length, replyForHeaderLen)
 		}
 		data := headerData[i+8 : i+8+int(length)]
 		out[key] = data
