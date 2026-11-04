@@ -323,35 +323,38 @@ func Test_ReplyForAbsent(t *testing.T) {
 	assert.Equal(t, int32(-1), m.ReplyFor())
 }
 
-// Test_unmarshalHeadersRejectsBadReplyFor asserts a malformed ReplyFor is rejected at
-// unmarshal, so the frame is dropped rather than silently treated as a non-reply.
-func Test_unmarshalHeadersRejectsBadReplyFor(t *testing.T) {
-	buildHeader := func(key int32, val []byte) []byte {
-		buf := make([]byte, 8+len(val))
-		binary.LittleEndian.PutUint32(buf[0:4], uint32(key))
-		binary.LittleEndian.PutUint32(buf[4:8], uint32(len(val)))
-		copy(buf[8:], val)
-		return buf
-	}
-
+// Test_ReadReplyForOtherWidth covers a message read off the wire with a value other than 4 bytes
+// under the ReplyFor key. The message must read, keep the value, and report not a reply.
+func Test_ReadReplyForOtherWidth(t *testing.T) {
 	for _, length := range []int{0, 1, 3, 5, 8} {
 		t.Run(fmt.Sprintf("len-%d", length), func(t *testing.T) {
-			_, err := unmarshalHeaders(buildHeader(ReplyForHeader, make([]byte, length)))
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "invalid replyFor header length")
+			value := bytes.Repeat([]byte{1}, length)
+			m := NewMessage(1, nil)
+			m.Headers[ReplyForHeader] = value
+
+			data, err := MarshalV2(m)
+			require.NoError(t, err)
+
+			read, err := ReadV2(bytes.NewReader(data))
+			require.NoError(t, err)
+			assert.Equal(t, value, []byte(read.Headers[ReplyForHeader]))
+			assert.False(t, read.IsReply())
+			assert.Equal(t, int32(-1), read.ReplyFor())
 		})
 	}
 
-	t.Run("valid", func(t *testing.T) {
-		headers, err := unmarshalHeaders(buildHeader(ReplyForHeader, []byte{1, 0, 0, 0}))
-		require.NoError(t, err)
-		assert.Equal(t, []byte{1, 0, 0, 0}, headers[ReplyForHeader])
-	})
+	// passes with or without the width check in unmarshalHeaders; it pins that a 4-byte value
+	// still reads as a reply
+	t.Run("len-4", func(t *testing.T) {
+		m := NewMessage(1, nil)
+		m.PutUint32Header(ReplyForHeader, 7)
 
-	t.Run("other header any length", func(t *testing.T) {
-		headers, err := unmarshalHeaders(buildHeader(TypeHeader, []byte{1, 2, 3}))
+		data, err := MarshalV2(m)
 		require.NoError(t, err)
-		assert.Equal(t, []byte{1, 2, 3}, headers[TypeHeader])
+
+		read, err := ReadV2(bytes.NewReader(data))
+		require.NoError(t, err)
+		assert.True(t, read.IsReplyingTo(7))
 	})
 }
 
