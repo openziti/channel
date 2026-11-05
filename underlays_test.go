@@ -18,7 +18,9 @@ package channel
 
 import (
 	"log/slog"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -35,6 +37,20 @@ func Test_Underlays_AddAndGetAll(t *testing.T) {
 	require.Len(t, all, 2)
 	require.Same(t, a, all[0])
 	require.Same(t, b, all[1])
+}
+
+func Test_Underlays_ZeroValueSupportsNotifications(t *testing.T) {
+	var u Underlays
+	l := &testUnderlayListener{}
+	u.AddListener(l)
+
+	a := &testUnderlay{}
+	b := &testUnderlay{}
+	u.Add(nil, a)
+	u.Add(nil, b)
+
+	require.Eventually(t, func() bool { return len(l.getAdded()) == 2 }, time.Second, time.Millisecond)
+	require.Equal(t, []Underlay{a, b}, l.getAdded())
 }
 
 func Test_Underlays_GetAllReturnsSnapshot(t *testing.T) {
@@ -98,9 +114,10 @@ func Test_Underlays_ListenerNotifiedOnAdd(t *testing.T) {
 	a := &testUnderlay{}
 	u.Add(nil, a)
 
-	require.Len(t, l.added, 1)
-	require.Same(t, a, l.added[0])
-	require.Empty(t, l.removed)
+	// Notification is delivered on a goroutine owned by Underlays, so it is not done when Add returns.
+	require.Eventually(t, func() bool { return len(l.getAdded()) == 1 }, time.Second, time.Millisecond)
+	require.Same(t, a, l.getAdded()[0])
+	require.Empty(t, l.getRemoved())
 }
 
 func Test_Underlays_ListenerNotifiedOnRemove(t *testing.T) {
@@ -112,8 +129,8 @@ func Test_Underlays_ListenerNotifiedOnRemove(t *testing.T) {
 	u.Add(nil, a)
 	u.Remove(nil, a)
 
-	require.Len(t, l.removed, 1)
-	require.Same(t, a, l.removed[0])
+	require.Eventually(t, func() bool { return len(l.getRemoved()) == 1 }, time.Second, time.Millisecond)
+	require.Same(t, a, l.getRemoved()[0])
 }
 
 func Test_Underlays_ListenerNotNotifiedOnRemoveNotPresent(t *testing.T) {
@@ -129,16 +146,25 @@ func Test_Underlays_ListenerCanCallGetAllWithoutDeadlock(t *testing.T) {
 	u := NewUnderlays()
 	var observed []Underlay
 
-	// Listener that reads from the Underlays during the callback.
-	// This should not deadlock since notifications happen outside the lock.
+	// Listener that reads from the Underlays during the callback. This must not deadlock: the
+	// notification runs on its own goroutine and holds neither the set lock nor the sequencer's.
+	done := make(chan struct{})
 	u.AddListener(&testUnderlayListenerF{
 		onAdded: func(_ Channel, _ Underlay) {
 			observed = u.GetAll()
+			close(done)
 		},
 	})
 
 	a := &testUnderlay{}
 	u.Add(nil, a)
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("listener was not notified; a callback reading back from Underlays must not deadlock")
+	}
+
 	require.Len(t, observed, 1)
 	require.Same(t, a, observed[0])
 }
@@ -163,14 +189,36 @@ func Test_Underlays_CountsByType_NoTypeHeaderMapsToDefault(t *testing.T) {
 	require.Equal(t, 2, counts[DefaultUnderlayType])
 }
 
+// testUnderlayListener records what it was notified of. Notifications arrive on a goroutine owned by
+// Underlays, so the slices are guarded and read back through the accessors.
 type testUnderlayListener struct {
+	lock    sync.Mutex
 	added   []Underlay
 	removed []Underlay
 }
 
-func (l *testUnderlayListener) UnderlayAdded(_ Channel, u Underlay) { l.added = append(l.added, u) }
-func (l *testUnderlayListener) UnderlayRemoved(_ Channel, u Underlay) {
+func (l *testUnderlayListener) UnderlayAdded(_ Channel, u Underlay, _ UnderlayEvent) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	l.added = append(l.added, u)
+}
+
+func (l *testUnderlayListener) UnderlayRemoved(_ Channel, u Underlay, _ UnderlayEvent) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
 	l.removed = append(l.removed, u)
+}
+
+func (l *testUnderlayListener) getAdded() []Underlay {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	return append([]Underlay(nil), l.added...)
+}
+
+func (l *testUnderlayListener) getRemoved() []Underlay {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	return append([]Underlay(nil), l.removed...)
 }
 
 type testUnderlayListenerF struct {
@@ -178,13 +226,13 @@ type testUnderlayListenerF struct {
 	onRemoved func(Channel, Underlay)
 }
 
-func (l *testUnderlayListenerF) UnderlayAdded(ch Channel, u Underlay) {
+func (l *testUnderlayListenerF) UnderlayAdded(ch Channel, u Underlay, _ UnderlayEvent) {
 	if l.onAdded != nil {
 		l.onAdded(ch, u)
 	}
 }
 
-func (l *testUnderlayListenerF) UnderlayRemoved(ch Channel, u Underlay) {
+func (l *testUnderlayListenerF) UnderlayRemoved(ch Channel, u Underlay, _ UnderlayEvent) {
 	if l.onRemoved != nil {
 		l.onRemoved(ch, u)
 	}
@@ -245,4 +293,92 @@ func Test_applyConstraints_ClosesBelowMinTotalWithoutConstraints(t *testing.T) {
 	impl.applyConstraints()
 
 	require.True(t, impl.IsClosed(), "channel below MinTotalUnderlays must close even with no per-type constraints")
+}
+
+// seqRecordingListener records the sequence and count of every event it is handed.
+type seqRecordingListener struct {
+	lock   sync.Mutex
+	events []UnderlayEvent
+}
+
+func (l *seqRecordingListener) record(event UnderlayEvent) {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	l.events = append(l.events, event)
+}
+
+func (l *seqRecordingListener) UnderlayAdded(_ Channel, _ Underlay, e UnderlayEvent)   { l.record(e) }
+func (l *seqRecordingListener) UnderlayRemoved(_ Channel, _ Underlay, e UnderlayEvent) { l.record(e) }
+
+func (l *seqRecordingListener) getEvents() []UnderlayEvent {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	return append([]UnderlayEvent(nil), l.events...)
+}
+
+// Test_Underlays_NotificationsAreOrderedAndCountsMatch drives concurrent adds and removes, which is
+// how a channel behaves when one underlay is replacing another. Listeners must see every change once,
+// in the order the changes happened, with the count the change produced. Without that, a listener
+// deriving state from the sequence settles on whichever notification happened to arrive last, and a
+// channel that briefly lost every underlay looks as though it never did.
+func Test_Underlays_NotificationsAreOrderedAndCountsMatch(t *testing.T) {
+	req := require.New(t)
+
+	u := NewUnderlays()
+	l := &seqRecordingListener{}
+	u.AddListener(l)
+
+	const rounds = 100
+	for i := 0; i < rounds; i++ {
+		underlay := &testUnderlay{}
+		u.Add(nil, underlay)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		// One underlay leaving while another arrives: the callbacks race.
+		next := &testUnderlay{}
+		go func() {
+			defer wg.Done()
+			u.Remove(nil, underlay)
+		}()
+		go func() {
+			defer wg.Done()
+			u.Add(nil, next)
+		}()
+		wg.Wait()
+		u.Remove(nil, next)
+	}
+
+	expected := rounds * 4
+	req.Eventually(func() bool { return len(l.getEvents()) == expected }, 30*time.Second, time.Millisecond,
+		"expected every change to be delivered")
+
+	events := l.getEvents()
+	for i, event := range events {
+		req.EqualValues(i, event.Seq, "notifications must arrive in the order the changes happened")
+		req.GreaterOrEqual(event.Count, 0, "count must describe a real state of the set")
+	}
+}
+
+// Test_Underlays_ZeroValueIsUsable guards the zero value, which callers may embed or declare directly
+// rather than going through NewUnderlays. Sequencing notifications must not depend on construction.
+func Test_Underlays_ZeroValueIsUsable(t *testing.T) {
+	req := require.New(t)
+
+	var u Underlays
+	l := &seqRecordingListener{}
+	u.AddListener(l)
+
+	a := &testUnderlay{}
+	req.NotPanics(func() {
+		u.Add(nil, a)
+		u.Remove(nil, a)
+	})
+
+	req.Eventually(func() bool { return len(l.getEvents()) == 2 }, time.Second, time.Millisecond)
+	events := l.getEvents()
+	req.EqualValues(0, events[0].Seq)
+	req.Equal(1, events[0].Count)
+	req.EqualValues(1, events[1].Seq)
+	req.Equal(0, events[1].Count)
 }
