@@ -410,9 +410,15 @@ func (self *channelImpl) AcceptUnderlay(underlay Underlay) error {
 		return fmt.Errorf("new underlay for '%s' not accepted: channel is closed", self.ConnectionId())
 	}
 
+	// The channel reports ownerId as its peer identity, and applications authorize on it.
+	// The group secret only shows that the peer knows the group, not who the peer is, so an
+	// underlay established under a different id must not join the channel.
 	if underlay.Id() != self.ownerId {
-		self.log.With("context", self.Label()).
-			Warn("new underlay has different id than channel owner", "id", underlay.Id(), "ownerId", self.ownerId)
+		if err := underlay.Close(); err != nil {
+			self.log.With("context", self.Label()).Error("error closing underlay", "error", err)
+		}
+		return fmt.Errorf("new underlay for '%s' not accepted: underlay id '%s' does not match channel owner id '%s'",
+			self.ConnectionId(), underlay.Id(), self.ownerId)
 	}
 
 	self.fallbackUnderlay.Store(&underlay)

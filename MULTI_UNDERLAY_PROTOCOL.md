@@ -72,8 +72,9 @@ the old group secret won't be recognized and new connections will be rejected.
 3. **Validation Process**
    - Listener checks if group exists by connection ID
    - Validates group secret matches
+   - Validates the underlay's id matches the id of the channel's first underlay
    - Accepts underlay into existing multi-channel
-   - Rejects if secret doesn't match or channel is closed
+   - Rejects if secret or id doesn't match or channel is closed
 
 ## Required Headers
 

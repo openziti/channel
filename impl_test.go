@@ -144,3 +144,68 @@ func TestSimpleChannelRejectsAdditionalUnderlays(t *testing.T) {
 		require.True(t, extra.IsClosed(), "rejected underlay should be closed")
 	})
 }
+
+// idUnderlay is a blockingUnderlay which reports a configurable id, to stand in for an
+// underlay established by a different peer identity.
+type idUnderlay struct {
+	*blockingUnderlay
+	id string
+}
+
+func (u *idUnderlay) Id() string { return u.id }
+
+// TestMultiUnderlayChannelRejectsUnderlayWithDifferentId verifies that an additional underlay
+// presenting the correct group secret is still refused when its id differs from the id of the
+// channel owner. The group secret alone must not let a different identity join a channel whose
+// Id() names someone else.
+func TestMultiUnderlayChannelRejectsUnderlayWithDifferentId(t *testing.T) {
+	secret := []byte("mysecret")
+	newUnderlay := func(id string) *idUnderlay {
+		return &idUnderlay{
+			blockingUnderlay: &blockingUnderlay{
+				testUnderlay: &testUnderlay{headers: map[int32][]byte{GroupSecretHeader: secret}},
+				closeCh:      make(chan struct{}),
+			},
+			id: id,
+		}
+	}
+
+	ctx := NewSenderContext()
+	senders := &singleSenders{SenderContext: ctx, sender: NewSingleChSender(ctx, make(chan Sendable, 1))}
+	msgSource := NewSimpleMessageSourceProvider(func(notifier *CloseNotifier) (Sendable, error) {
+		<-notifier.GetCloseNotify()
+		return nil, io.EOF
+	})
+
+	config := &Config{
+		LogicalName:           "test",
+		Underlay:              newUnderlay("owner"),
+		Binder:                MakeBinder(BindHandlerF(func(Binding) error { return nil })),
+		Senders:               senders,
+		MessageSourceProvider: msgSource,
+		Constraints:           map[string]UnderlayConstraint{"default": {Desired: 2, Min: 1}},
+	}
+
+	ch, err := NewChannel(config)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ch.Close() })
+
+	impl := ch.(*channelImpl)
+	require.Equal(t, "owner", impl.Id())
+
+	t.Run("different id rejected and closed", func(t *testing.T) {
+		extra := newUnderlay("intruder")
+		err := impl.AcceptUnderlay(extra)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "does not match channel owner id")
+		require.True(t, extra.IsClosed(), "rejected underlay should be closed")
+		require.Len(t, impl.GetUnderlays(), 1)
+	})
+
+	t.Run("same id accepted", func(t *testing.T) {
+		extra := newUnderlay("owner")
+		require.NoError(t, impl.AcceptUnderlay(extra))
+		require.False(t, extra.IsClosed())
+		require.Len(t, impl.GetUnderlays(), 2)
+	})
+}
